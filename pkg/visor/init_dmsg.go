@@ -1049,15 +1049,10 @@ func dmsgOnlyDisc(dmsgC *dmsg.Client, discPK cipher.PubKey, log *logging.Logger)
 // server without a redundant transit client. The client-side self-session
 // guard (SkipSelfServer, wired in dmsgc.New) keeps v.dmsgC from dialing this
 // co-resident server.
-// Defaults for the folded dmsg server's built-in wss listener. :443 is not
-// a preference — it is where autocert's TLS-ALPN-01 challenge has to be
-// answered, and where the standalone dmsg-server this fold replaced already
-// listened. The cache dir sits beside the visor config for the same reason:
-// it is where that server kept its certificate.
-const (
-	defaultDmsgWSTLSAddress  = ":443"
-	defaultDmsgWSTLSCacheDir = "dmsg-autocert"
-)
+// dmsgWSTLSCacheDirName is where a folded dmsg server keeps its autocert
+// certificate cache when ws_tls_cache_dir is unset: beside the visor config,
+// which is where the standalone server this fold replaced already kept it.
+const dmsgWSTLSCacheDirName = "dmsg-autocert"
 
 func initDmsgServer(ctx context.Context, v *Visor, log *logging.Logger) error {
 	if v.conf.Dmsg == nil || v.conf.Dmsg.Server == nil || !v.conf.Dmsg.Server.Enabled {
@@ -1160,23 +1155,21 @@ func initDmsgServer(ctx context.Context, v *Visor, log *logging.Logger) error {
 			log.WithField("ws_url", wssURL).
 				Info("Serving dmsg over WebSocket on the shared transport port")
 
-			// ...and the TLS that makes that URL dialable. The advert is
-			// wss://, and on these hosts the terminator was never a reverse
-			// proxy — it was the standalone dmsg-server's own autocert
-			// listener on :443, which the fold retired along with the process
-			// that owned it. So restoring the WS route alone left every folded
-			// server advertising a wss front that refuses the connection.
-			// Same listener, same certificate cache, now owned by the visor.
-			if !srvCfg.DisableWSTLS {
-				tlsAddr := srvCfg.WSTLSAddress
-				if tlsAddr == "" {
-					tlsAddr = defaultDmsgWSTLSAddress
-				}
+			// ...and, where the host has no front of its own, the TLS that
+			// makes that URL dialable. Whether one exists differs per host:
+			// some already run Caddy on :443, and on the rest the terminator
+			// was the standalone dmsg-server's OWN autocert listener, which
+			// the fold retired along with the process that owned it. So
+			// restoring the WS route alone left those hosts advertising a wss
+			// front that refuses the connection. ws_tls_address says which
+			// kind of host this is, exactly as it does in a standalone
+			// dmsg-server config; empty keeps the external front.
+			if tlsAddr := srvCfg.WSTLSAddress; tlsAddr != "" {
 				cacheDir := srvCfg.WSTLSCacheDir
 				if cacheDir == "" {
-					cacheDir = defaultDmsgWSTLSCacheDir
+					cacheDir = dmsgWSTLSCacheDirName
 					if p := v.conf.Path(); p != "" {
-						cacheDir = filepath.Join(filepath.Dir(p), defaultDmsgWSTLSCacheDir)
+						cacheDir = filepath.Join(filepath.Dir(p), dmsgWSTLSCacheDirName)
 					}
 				}
 				if tlsLis := dmsgsrv.ServeWSTLS(log, srv, tlsAddr, cacheDir, wssHost, wssURL); tlsLis != nil {
