@@ -19,13 +19,14 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/rpc"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
+
+	rpc "github.com/0magnet/gobrpc"
 
 	chi "github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -569,7 +570,7 @@ func (s *service) serveRouteSetup(ctx context.Context, dmsgC *dmsg.Client) {
 		}
 
 		rpcS := rpc.NewServer()
-		if regErr := rpcS.Register(gw); regErr != nil {
+		if regErr := router.RegisterSetupRPCGateway(rpcS, "SetupRPCGateway", gw); regErr != nil {
 			snLog.WithError(regErr).Error("Failed to register setup RPC")
 			conn.Close() //nolint:errcheck,gosec
 			continue
