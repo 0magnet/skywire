@@ -1,5 +1,3 @@
-//go:build !(tinygo && js)
-
 // Package network pkg/transport/network/sudph.go c2-net-transport
 package network
 
