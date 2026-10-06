@@ -1,4 +1,4 @@
-//go:build !tinygo
+//go:build !(tinygo && js)
 // +build !tinygo
 
 // Package history pkg/skychat/history/store_bolt.go c4-app-chat
