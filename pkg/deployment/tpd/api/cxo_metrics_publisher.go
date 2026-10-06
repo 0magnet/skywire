@@ -50,7 +50,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	jsoniter "github.com/json-iterator/go"
 	"sort"
 	"sync"
 	"time"
@@ -61,6 +60,7 @@ import (
 	"github.com/skycoin/skywire/pkg/cxo/treestore"
 	"github.com/skycoin/skywire/pkg/deployment/tpd/store"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"
+	"github.com/skycoin/skywire/pkg/fastjson"
 	"github.com/skycoin/skywire/pkg/logging"
 	"github.com/skycoin/skywire/pkg/skyenv"
 )
@@ -69,7 +69,7 @@ import (
 // transport per day, and that marshal — not the compression — is where its
 // allocations go; the stdlib encoder's reflection is the slower half of a
 // publish measured at a third of this service's CPU (2026-09-11).
-var fastJSON = jsoniter.ConfigFastest
+var fastJSON = fastjson.JSON
 
 const (
 	// metricsWindowDays is how much history the feed carries. It is

@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/sirupsen/logrus"
 
 	"github.com/skycoin/skywire/pkg/buildinfo"
@@ -23,6 +22,7 @@ import (
 	"github.com/skycoin/skywire/pkg/dmsg/disc/metrics"
 	"github.com/skycoin/skywire/pkg/dmsg/discovery/store"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"
+	"github.com/skycoin/skywire/pkg/fastjson"
 	"github.com/skycoin/skywire/pkg/httputil"
 	"github.com/skycoin/skywire/pkg/logging"
 	"github.com/skycoin/skywire/pkg/metricsutil"
@@ -30,7 +30,7 @@ import (
 
 var log = logging.MustGetLogger("dmsg-discovery")
 
-var json = jsoniter.ConfigFastest
+var json = fastjson.JSON
 
 // WhitelistPKs store whitelisted pks of network monitor
 var WhitelistPKs = nmpk.GetWhitelistPKs()
