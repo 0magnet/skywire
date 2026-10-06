@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/xtaci/kcp-go"
+	"github.com/xtaci/kcp-go/v5"
 
 	"github.com/skycoin/skywire/pkg/logging"
 )

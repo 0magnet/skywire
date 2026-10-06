@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/AudriusButkevicius/pfilter"
-	kcp "github.com/xtaci/kcp-go"
+	kcp "github.com/xtaci/kcp-go/v5"
 )
 
 // TestUDPDemux_KCPRealTraffic validates the demux against REAL sudph traffic: a

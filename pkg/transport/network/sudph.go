@@ -1,4 +1,4 @@
-//go:build !tinygo
+//go:build !(tinygo && js)
 
 // Package network pkg/transport/network/sudph.go c2-net-transport
 package network
@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/AudriusButkevicius/pfilter"
-	"github.com/xtaci/kcp-go"
+	"github.com/xtaci/kcp-go/v5"
 
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"

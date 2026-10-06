@@ -1,4 +1,4 @@
-//go:build !tinygo
+//go:build !(tinygo && js)
 
 // Package addrresolver pkg/transport/network/addrresolver/client_sudph.go c2-net-transport
 //
@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/AudriusButkevicius/pfilter"
-	"github.com/xtaci/kcp-go"
+	"github.com/xtaci/kcp-go/v5"
 
 	"github.com/skycoin/skywire/pkg/netutil"
 	"github.com/skycoin/skywire/pkg/transport/network/packetfilter"
