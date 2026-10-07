@@ -19,6 +19,7 @@ require (
 	github.com/0magnet/golang-ipc v1.2.5-0.20260915170035-de9342a68204
 	github.com/0magnet/got v0.0.0
 	github.com/0magnet/gotop/v4 v4.2.1-0.20261004195426-3f6a467d1e1a
+	github.com/0magnet/kcp-go/v5 v5.6.73
 	github.com/0magnet/lolcat-go v0.0.0
 	github.com/0magnet/metrics v1.44.1-0.20261004194541-261721063b63
 	github.com/0magnet/netscrape v0.0.0
@@ -118,7 +119,6 @@ require (
 	github.com/toqueteos/webbrowser v1.2.1
 	github.com/vishvananda/netlink v1.3.1
 	github.com/wlynxg/anet v0.0.5
-	github.com/xtaci/kcp-go/v5 v5.6.72
 	github.com/xtaci/smux v1.5.57
 	github.com/xxxserxxx/lingo/v2 v2.0.1
 	github.com/yuin/goldmark v1.8.6

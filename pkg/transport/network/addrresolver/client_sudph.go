@@ -15,8 +15,8 @@ import (
 	"net"
 	"time"
 
+	kcp "github.com/0magnet/kcp-go/v5"
 	"github.com/AudriusButkevicius/pfilter"
-	"github.com/xtaci/kcp-go/v5"
 
 	"github.com/skycoin/skywire/pkg/netutil"
 	"github.com/skycoin/skywire/pkg/transport/network/packetfilter"

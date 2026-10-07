@@ -79,6 +79,9 @@ github.com/0magnet/gotop/v4/termui
 github.com/0magnet/gotop/v4/termui/drawille-go
 github.com/0magnet/gotop/v4/utils
 github.com/0magnet/gotop/v4/widgets
+# github.com/0magnet/kcp-go/v5 v5.6.73
+## explicit; go 1.24.0
+github.com/0magnet/kcp-go/v5
 # github.com/0magnet/lolcat-go v0.0.0
 ## explicit; go 1.25.0
 github.com/0magnet/lolcat-go/lol
@@ -1401,9 +1404,6 @@ github.com/wlynxg/anet
 # github.com/xo/terminfo v1.2.0
 ## explicit; go 1.25
 github.com/xo/terminfo
-# github.com/xtaci/kcp-go/v5 v5.6.72
-## explicit; go 1.24.0
-github.com/xtaci/kcp-go/v5
 # github.com/xtaci/lossyconn v0.0.0-20200209145036-adba10fffc37
 ## explicit; go 1.13
 # github.com/xtaci/smux v1.5.57
