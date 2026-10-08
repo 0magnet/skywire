@@ -1289,9 +1289,7 @@ func (tm *Manager) prepareAccept(transport network.Transport) (*ManagedTransport
 		})
 		tm.applyHandlers(mTp)
 
-		go func() {
-			mTp.Serve(tm.readCh)
-
+		mTp.Start(tm.readCh, func() {
 			tm.mx.Lock()
 			// Identity-checked delete: a concurrent dial/accept to the same
 			// peer resolves to this same deterministic tpID and may have
@@ -1302,7 +1300,7 @@ func (tm *Manager) prepareAccept(transport network.Transport) (*ManagedTransport
 				delete(tm.tps, mTp.Entry.ID)
 			}
 			tm.mx.Unlock()
-		}()
+		})
 
 		tm.tps[tpID] = mTp
 		tm.track(mTp)
@@ -1574,7 +1572,7 @@ func (tm *Manager) saveTransportInternal(ctx context.Context, remote cipher.PubK
 	// Serve runs for the transport's lifetime, not the dial's; its internal
 	// datagram-read context correctly derives from Background (a short-lived
 	// dial ctx would kill the QUIC datagram loop prematurely). #2607.
-	go mTp.Serve(tm.readCh) //nolint:gosec // G118: long-lived transport goroutine, not request-scoped
+	mTp.Start(tm.readCh, nil)
 
 	tm.Logger.Debugf("saved transport: remote(%s) type(%s) tpID(%s)", remote, netType, tpID)
 

@@ -95,6 +95,9 @@ type ManagedTransport struct {
 	client      network.Client
 	transport   network.Transport
 	transportCh chan struct{}
+	// push is set by Start when reads go to the push workers. Guarded by
+	// transportMx.
+	push        *pushState
 	transportMx sync.Mutex
 	// writeSem serializes writers against each other on the underlying conn, so
 	// a packet reaches the wire as one frame. It is deliberately NOT
@@ -996,7 +999,12 @@ func (mt *ManagedTransport) closeWith(reason string) {
 		}
 		mt.transport = nil
 	}
+	ps := mt.push
 	mt.transportMx.Unlock()
+	if ps != nil {
+		// Not inline: closeWith can run under the manager's lock, which onEnd takes.
+		go ps.finish()
+	}
 	if mt.queueDeletion != nil {
 		mt.queueDeletion(mt.Entry.ID)
 	} else {
@@ -1024,7 +1032,11 @@ func (mt *ManagedTransport) closeWithoutDeregister() {
 		}
 		mt.transport = nil
 	}
+	ps := mt.push
 	mt.transportMx.Unlock()
+	if ps != nil {
+		go ps.finish()
+	}
 }
 
 // Accept accepts a new underlying transport.
@@ -1149,6 +1161,7 @@ func (mt *ManagedTransport) setTransport(newTransport network.Transport) {
 
 	// Set new underlying transport.
 	mt.transport = newTransport
+	mt.attachPush(newTransport)
 	select {
 	case mt.transportCh <- struct{}{}:
 		mt.log.Debug("Sent signal to 'mt.transportCh'.")

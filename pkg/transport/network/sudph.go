@@ -354,3 +354,5 @@ func pushPacketConn(c net.PacketConn) net.PacketConn {
 	}
 	return plainPacketConn(c)
 }
+
+var _ PushSource = (*kcp.UDPSession)(nil)
