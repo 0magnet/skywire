@@ -160,6 +160,15 @@ const (
 	// keeps that connection warm. The visor's subscriber binds it too.
 	DmsgConfCXOPort uint16 = 78
 
+	// DmsgTPDPerKeyCXOPort is the dmsg port TPD's per-key publisher listens
+	// on: transport counts by type for every visor, the GET
+	// /all-transports/per-key-stats body (perkey/stats, ~38 KB gzipped). What
+	// the network view and `cli tp tpd-stats` read instead of downloading the
+	// whole transport list to count it. Its own port because it is two orders
+	// of magnitude larger than the stats feed's bodies and two smaller than
+	// the all-transports snapshot.
+	DmsgTPDPerKeyCXOPort uint16 = 79
+
 	// DmsgDMSGDRegistrationCXOPort is the dmsg port the dmsg-discovery's CXO
 	// client-entry REGISTRATION aggregator binds (and each visor's entry
 	// publisher binds for the reverse subscribe). A visor publishes its own
@@ -424,6 +433,12 @@ const (
 	// VPNClientPort over dmsg
 	VPNClientPort uint16 = 43
 
+	// SkyDNSName is the name of the app answering mesh names on a phone
+	SkyDNSName = "skydns"
+
+	// SkyDNSPort is the skydns app's routing port. It only dials.
+	SkyDNSPort uint16 = 42
+
 	// VPNRouterName is the name of the vpn router (gateway / WiFi-AP) app. It is a
 	// LOCAL companion to vpn-client with no dmsg port of its own: it aggregates
 	// downstream LAN/WiFi clients and NATs them into the tunnel vpn-client owns.
@@ -640,6 +655,8 @@ func AppDisplayName(app string) string {
 		return "Skysocks"
 	case VPNClientName:
 		return "SkyVPN"
+	case SkyDNSName:
+		return "SkyDNS"
 	case SkydexClientName:
 		return "SkyDEX"
 	case "":

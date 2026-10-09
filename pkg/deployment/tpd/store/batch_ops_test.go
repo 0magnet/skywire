@@ -10,6 +10,7 @@ import (
 
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/transport"
+	tptypes "github.com/skycoin/skywire/pkg/transport/types"
 )
 
 func TestBatchOpsTouchDeregisterHeartbeat(t *testing.T) {
@@ -23,10 +24,19 @@ func TestBatchOpsTouchDeregisterHeartbeat(t *testing.T) {
 
 	// Touch resets the lifetime without rewriting.
 	require.NoError(t, s.client.Expire(ctx, s.transportKey(e1.ID), 5*time.Second).Err())
-	require.NoError(t, s.TouchTransports(ctx, a, []uuid.UUID{e1.ID, e2.ID}))
+	missing, err := s.TouchTransports(ctx, a, []uuid.UUID{e1.ID, e2.ID})
+	require.NoError(t, err)
+	require.Empty(t, missing)
 	ttl, err := s.client.TTL(ctx, s.transportKey(e1.ID)).Result()
 	require.NoError(t, err)
 	require.Greater(t, ttl, 30*time.Second)
+
+	// A key that is gone is reported, not silently "extended".
+	require.NoError(t, s.client.Del(ctx, s.transportKey(e2.ID)).Err())
+	missing, err = s.TouchTransports(ctx, a, []uuid.UUID{e1.ID, e2.ID})
+	require.NoError(t, err)
+	require.Equal(t, []uuid.UUID{e2.ID}, missing)
+	require.NoError(t, s.RegisterTransportsBatch(ctx, a, []*transport.SignedEntry{{Entry: e2}}))
 
 	// Heartbeats: one pipeline, once per slot.
 	require.NoError(t, s.RecordTransportHeartbeats(ctx, []*transport.Entry{e1, e2}, time.Time{}))
@@ -44,4 +54,23 @@ func TestBatchOpsTouchDeregisterHeartbeat(t *testing.T) {
 	members, err := s.client.SMembers(ctx, s.edgeKey(a)).Result()
 	require.NoError(t, err)
 	require.Empty(t, members)
+}
+
+// Every transport type but dmsg gets an uptime timeline, through both the
+// batched and the single heartbeat path.
+func TestHeartbeatsTrackEveryTypeButDmsg(t *testing.T) {
+	s := newTestRedisStore(t)
+	ctx := context.Background()
+	a, _ := cipher.GenerateKeyPair()
+	b, _ := cipher.GenerateKeyPair()
+	tp := func(typ string) *transport.Entry {
+		return &transport.Entry{ID: uuid.New(), Edges: transport.SortEdges(a, b), Type: tptypes.Type(typ)}
+	}
+	squicr, webrtc, dmsg, swtr := tp("squicr"), tp("webrtc"), tp("dmsg"), tp("swtr")
+	require.NoError(t, s.RecordTransportHeartbeats(ctx, []*transport.Entry{squicr, webrtc, dmsg}, time.Time{}))
+	require.NoError(t, s.RecordTransportHeartbeat(ctx, swtr.ID, "swtr", time.Time{}))
+	date := time.Now().UTC().Format("2006-01-02")
+	members, err := s.client.SMembers(ctx, tpUptimeOnlineKey(date)).Result()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{squicr.ID.String(), webrtc.ID.String(), swtr.ID.String()}, members)
 }

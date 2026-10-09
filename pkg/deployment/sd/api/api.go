@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/skycoin/skywire/pkg/buildinfo"
 	"github.com/skycoin/skywire/pkg/cipher"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/deployment/monitor/nmpk"
 	sdmetrics "github.com/skycoin/skywire/pkg/deployment/sd/metrics"
 	"github.com/skycoin/skywire/pkg/deployment/sd/store"
@@ -61,6 +63,9 @@ var WhitelistPKs = nmpk.GetWhitelistPKs()
 
 // API represents the service-discovery API.
 type API struct {
+	// Stats, when set, adds the process and traffic charts to the status page.
+	Stats *charts.ServiceStats
+
 	// Handler is the chi router, built once in New. Every sibling
 	// service (tpd, ar, dmsg-discovery) does the same; SD used to
 	// rebuild the whole router — middleware stack and all routes —
@@ -99,6 +104,9 @@ type API struct {
 	// null-check via pub == nil so the HTTP path always works
 	// regardless.
 	cxoPublisher *ServicesCXOPublisher
+
+	// chartsPage is set once StartCharts runs; until then / answers 404.
+	chartsPage atomic.Pointer[charts.Page]
 }
 
 // SetDHTMirror sets a mirror that publishes per-visor service lists to
@@ -282,6 +290,7 @@ func (a *API) newRouter() chi.Router {
 	r.Get("/uptimes", a.getUptimes)
 	r.Post("/uptimes", a.postUptimes)
 	r.Get("/health", a.health)
+	r.Get("/", a.ChartsPage)
 
 	if a.nonceDB != nil {
 		handler := &httpauth.NonceHandler{Store: a.nonceDB}

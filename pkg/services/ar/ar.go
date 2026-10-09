@@ -14,10 +14,12 @@ import (
 
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/cxo/node"
+	"github.com/skycoin/skywire/pkg/cxo/storeconfig"
 	"github.com/skycoin/skywire/pkg/deployment/ar/api"
 	armetrics "github.com/skycoin/skywire/pkg/deployment/ar/metrics"
 	"github.com/skycoin/skywire/pkg/deployment/ar/regcxo"
 	"github.com/skycoin/skywire/pkg/deployment/ar/store"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"
 	"github.com/skycoin/skywire/pkg/httpauth"
 	"github.com/skycoin/skywire/pkg/logging"
@@ -55,6 +57,8 @@ type service struct {
 	// state, set by build and startCXO, is reported by State.
 	store, nonceStore string
 	cxo               services.CXOSet
+	// stats, set by Run, counts the process and its traffic for the status page.
+	stats *charts.ServiceStats
 }
 
 // State implements services.Stater.
@@ -124,6 +128,8 @@ func (s *service) build(ctx context.Context, logger *logging.Logger, dmsgAddr st
 	}
 
 	go arAPI.ListenUDP(udpListener)
+	arAPI.Stats = s.stats
+	arAPI.StartCharts(ctx, chartStore(storeConfig, logger), logger)
 	logger.Infof("UDP listener (SUDPH) on %s", udpAddr)
 
 	return &built{api: arAPI, store: transportStore, close: func() {
@@ -182,6 +188,8 @@ func (s *service) Run(ctx context.Context) error {
 	cfg := s.cfg
 
 	logger := services.NewLogger(cfg.LogTag("address_resolver"), cfg.LogLevel)
+	s.stats = charts.NewServiceStats("address resolver")
+	s.cxo.Stats = s.stats
 	defer cfg.StartPprof(logger)()
 
 	pk := cfg.PubKey
@@ -232,6 +240,7 @@ func (s *service) Run(ctx context.Context) error {
 	}
 
 	h, err := svcmode.Start(runCtx, svcmode.Config{
+		Stats:               s.stats,
 		Mode:                resolvedMode,
 		HTTPAddr:            addr,
 		Handler:             arAPI,
@@ -252,6 +261,15 @@ func (s *service) Run(ctx context.Context) error {
 	}
 	defer h.Close()
 
+	if cfg.ChartsAddr != "" {
+		logger.Infof("Serving the charts page on %s", cfg.ChartsAddr)
+		go func() {
+			if err := charts.Serve(runCtx, cfg.ChartsAddr, http.HandlerFunc(arAPI.ChartsPage)); err != nil {
+				logger.WithError(err).Error("charts listener failed")
+			}
+		}()
+	}
+
 	if h.DmsgClient != nil {
 		s.startCXO(runCtx, h.DmsgClient, nil, sk, b, logger)
 	}
@@ -268,4 +286,17 @@ func (s *service) Run(ctx context.Context) error {
 // AggregatorPorts implements services.CXOAggregating.
 func (s *service) AggregatorPorts() []uint16 {
 	return []uint16{skyenv.DmsgVisorARBindCXOPort}
+}
+
+// chartStore keeps the chart samples in the resolver's redis.
+func chartStore(sc storeconfig.Config, log *logging.Logger) charts.Store {
+	if sc.Type != storeconfig.Redis {
+		return charts.NewMemoryStore()
+	}
+	st, err := charts.NewRedisStore(sc.URL, sc.Password, redisPrefix)
+	if err != nil {
+		log.WithError(err).Warn("charts: redis unavailable, keeping samples in memory")
+		return charts.NewMemoryStore()
+	}
+	return st
 }

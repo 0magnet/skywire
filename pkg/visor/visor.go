@@ -33,6 +33,7 @@ import (
 	dmsgdisc "github.com/skycoin/skywire/pkg/dmsg/disc"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"
 	"github.com/skycoin/skywire/pkg/flightrec"
+	"github.com/skycoin/skywire/pkg/httputil"
 	"github.com/skycoin/skywire/pkg/logging"
 	"github.com/skycoin/skywire/pkg/pty"
 	"github.com/skycoin/skywire/pkg/rfclient"
@@ -86,6 +87,9 @@ var mLog = initLogger()
 type Visor struct {
 	closeStack []closer
 
+	// tempLog is the log level set for a while from /debug/loglevel.
+	tempLog tempLogLevel
+
 	// svcFetch is the short-lived cache in front of FetchServiceData for the
 	// service-discovery lists, with one fetch in flight per key. See
 	// svcFetchCached.
@@ -120,7 +124,11 @@ type Visor struct {
 	dmsgHTTPOnce sync.Once
 	dmsgHTTPTr   *http.Transport
 	// dmsgSkynet counts how dials to .dmsg peers went (dmsg_over_skynet.go).
-	dmsgSkynet  dmsgSkynetStats
+	dmsgSkynet dmsgSkynetStats
+	// reach holds this visor's reach card and the peers' it fetched (reach_card.go).
+	reach reachCards
+	// tpList caches the signed list GET /transports serves.
+	tpList      transportListCache
 	dmsgDC      *dmsg.Client       // dmsg direct client
 	dClient     dmsgdisc.APIClient // dmsg direct api client
 	dmsgHTTP    *http.Client       // dmsghttp client
@@ -247,6 +255,8 @@ type Visor struct {
 	// bootstrap direct client uses the addresses last learned from
 	// dmsg-discovery, not the (potentially stale) addresses in skywire.json.
 	dmsgServersCache *DmsgServersCache
+	// serversFeedOnce holds the dmsg discovery feed once for the server cache.
+	serversFeedOnce sync.Once
 
 	// deploySvcMu serializes applying the deployment's services config: the
 	// conf service's CXO feed and the hourly dmsg-HTTP refresh can both
@@ -430,7 +440,10 @@ type Visor struct {
 	// Accepts inbound SMTP from a co-located Postfix and dials peers via
 	// the visor's dmsg client. Standalone hosts use cmd/smb.
 	embeddedSkymailBridge *EmbeddedSkymailBridge
-	tpdAnnounce           tpdAnnounceStats // announces of the transport-list feed, for visor state
+	tpdAnnounce           tpdAnnounceStats           // announces of the transport-list feed, for visor state
+	tpdFeed               atomic.Pointer[tpdFeedRef] // the transport-list feed, for tpdFeedHealthy
+	arBindings            arBindingsIndex            // the address resolver's bindings feed, for lookups
+	autoTpCooldown        autoTpCooldown             // automatic transports that failed recently, by peer and type
 	mail                  skymailHost
 	embeddedWisp          *EmbeddedWisp
 	// Shared VStreamMux for skynet forwarding (route ID 0).
@@ -698,8 +711,9 @@ func run(parentCtx context.Context, conf *visorconfig.V1, opts Options) error {
 		_, err := logging.LevelFromString(opts.LogLevel)
 		if err != nil {
 			mLog.WithError(err).Error("Invalid log level specified: ", opts.LogLevel)
+			opts.LogLevel = ""
 		} else {
-			conf.LogLevel = opts.LogLevel
+			// Applied in NewVisor; never copied into conf (see there).
 			mLog.Info("setting log level to: ", opts.LogLevel)
 		}
 	}
@@ -885,7 +899,14 @@ func NewVisor(ctx context.Context, conf *visorconfig.V1, opts Options, logBcast 
 	// heap's peak is never returned to the host. The wasm config writer
 	// (pkg/skywireconfig/genvisor/marshal_js.go) writes LogLevel verbatim with
 	// no default of its own, which is one way to arrive here empty.
+	//
+	// The --loglvl flag (opts.LogLevel, validated in run) wins over the
+	// config but is never stored in it: a later Flush would write it to disk,
+	// and the config would keep it after the flag was gone.
 	logLevel := conf.LogLevel
+	if opts.LogLevel != "" {
+		logLevel = opts.LogLevel
+	}
 	if logLevel == "" {
 		logLevel = skyenv.LogLevel
 	}
@@ -1531,6 +1552,24 @@ func (v *Visor) GetTransportTypeCounts() map[string]int {
 func (v *Visor) GetTransportCounts() (stcpr, sudph int) {
 	counts := v.GetTransportTypeCounts()
 	return counts[string(tptypes.STCPR)], counts[string(tptypes.SUDPH)]
+}
+
+// DmsgSessionCount is the visor's sessions with dmsg servers.
+func (v *Visor) DmsgSessionCount() int {
+	if v.dmsgC == nil {
+		return 0
+	}
+	return len(v.dmsgC.AllSessions())
+}
+
+// DmsgServerHealth is the load of the dmsg server this visor runs, or nil.
+func (v *Visor) DmsgServerHealth() *httputil.DmsgServerHealth {
+	srv := v.dmsgSrv.Load()
+	if srv == nil {
+		return nil
+	}
+	st := srv.Stats()
+	return httputil.DmsgServerHealthOf(st.ClientSessions, st.PeerSessions, st.ActiveStreams, st.StreamsRelayed, st.BytesUp, st.BytesDown)
 }
 
 // GetNetworkTypes returns the network types used by the visor.

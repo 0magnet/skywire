@@ -36,6 +36,9 @@ type discoveryEndpoint struct {
 
 // EntityCommon contains the common fields and methods for server and client entities.
 type EntityCommon struct {
+	// relay counts the streams this entity bridged and the bytes they carried.
+	relay relayCounters
+
 	// atomic requires 64-bit alignment for struct field access
 	lastUpdate atomic.Int64 // Timestamp (in unix seconds) of last update.
 
@@ -1407,20 +1410,6 @@ func (c *EntityCommon) updateClientEntryLoop(ctx context.Context, done chan stru
 			rearm(runUpdate("nudge"))
 		}
 	}
-}
-
-func (c *EntityCommon) entryProtocol(ctx context.Context, pk cipher.PubKey) string {
-	endpoints := c.snapshotDiscoveries()
-	for _, ep := range endpoints {
-		entry, err := ep.Client.Entry(ctx, pk)
-		if err != nil {
-			continue
-		}
-		c.log.WithField("entry", entry).Debug("Entry's protocol fetch.")
-		return entry.Protocol
-	}
-	c.log.WithField("pk", pk).Warn("Entry not found in any discovery; returning empty protocol.")
-	return ""
 }
 
 func (c *EntityCommon) delEntry(ctx context.Context) (err error) {

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,12 +21,18 @@ import (
 	"github.com/skycoin/skywire/pkg/buildinfo"
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/cmdutil"
+	"github.com/skycoin/skywire/pkg/cxo/cxosub"
 	"github.com/skycoin/skywire/pkg/cxo/node"
+	"github.com/skycoin/skywire/pkg/cxo/storeconfig"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
+	"github.com/skycoin/skywire/pkg/deployment/netgraph"
 	"github.com/skycoin/skywire/pkg/deployment/tpd/api"
 	"github.com/skycoin/skywire/pkg/deployment/tpd/cxoaggregator"
 	tpdiscmetrics "github.com/skycoin/skywire/pkg/deployment/tpd/metrics"
 	"github.com/skycoin/skywire/pkg/deployment/tpd/store"
+	"github.com/skycoin/skywire/pkg/dmsg/discovery/serverfeed"
 	"github.com/skycoin/skywire/pkg/dmsg/dmsg"
+	"github.com/skycoin/skywire/pkg/dmsg/dmsghttp"
 	"github.com/skycoin/skywire/pkg/httpauth"
 	"github.com/skycoin/skywire/pkg/logging"
 	"github.com/skycoin/skywire/pkg/metricsutil"
@@ -65,6 +72,8 @@ type service struct {
 	// state, set by build and startCXO, is reported by State.
 	store, nonceStore string
 	cxo               services.CXOSet
+	// stats, set by Run, counts the process and its traffic for the status page.
+	stats *charts.ServiceStats
 }
 
 // State implements services.Stater.
@@ -168,6 +177,9 @@ func (s *service) build(ctx context.Context, logger *logging.Logger, dmsgAddr st
 	if storeDataPath == "" {
 		storeDataPath = "/var/lib/skywire/tpd/bandwidth"
 	}
+	if la, ok := st.(interface{ SetLeafArchive(string) }); ok {
+		la.SetLeafArchive(filepath.Join(storeDataPath, "leaves"))
+	}
 	tpdAPI := api.New(logger, st, nonceStore, enableMetrics, m, dmsgAddr, storeDataPath)
 	tpdAPI.SetEntryTimeout(cfg.EntryTimeout.Std())
 	if live {
@@ -181,6 +193,12 @@ func (s *service) build(ctx context.Context, logger *logging.Logger, dmsgAddr st
 	logger.Infof("Transport entry timeout: %v", cfg.EntryTimeout)
 
 	go tpdAPI.RunBackgroundTasks(ctx, logger)
+	if cs, err := s.chartStore(storeCfg); err != nil {
+		logger.WithError(err).Warn("charts unavailable")
+	} else {
+		tpdAPI.Stats = s.stats
+		tpdAPI.StartCharts(ctx, cs, logger)
+	}
 
 	return &built{api: tpdAPI, st: st, logger: logger, close: closeAll}, nil
 }
@@ -217,6 +235,8 @@ func (s *service) Run(ctx context.Context) error {
 	cfg := s.cfg
 
 	logger := services.NewLogger(cfg.LogTag("transport_discovery"), cfg.LogLevel)
+	s.stats = charts.NewServiceStats("transport discovery")
+	s.cxo.Stats = s.stats
 	defer cfg.StartPprof(logger)()
 
 	pk := cfg.PubKey
@@ -268,6 +288,7 @@ func (s *service) Run(ctx context.Context) error {
 	surveyWL := cfg.SurveyKeys()
 
 	h, err := svcmode.Start(runCtx, svcmode.Config{
+		Stats:               s.stats,
 		Mode:                resolvedMode,
 		HTTPAddr:            addr,
 		Handler:             tpdAPI,
@@ -288,8 +309,25 @@ func (s *service) Run(ctx context.Context) error {
 	}
 	defer h.Close()
 
+	if cfg.ChartsAddr != "" {
+		logger.Infof("Serving the charts page on %s", cfg.ChartsAddr)
+		go func() {
+			if err := charts.Serve(runCtx, cfg.ChartsAddr, http.HandlerFunc(tpdAPI.ChartsPage),
+				charts.Extra{Path: "/graph", Handler: http.HandlerFunc(tpdAPI.GraphPage)},
+				charts.Extra{Path: "/graph/engine.wasm", Handler: http.HandlerFunc(netgraph.EngineWasm)},
+				charts.Extra{Path: "/graph/engine.js", Handler: http.HandlerFunc(netgraph.EngineLoader)}); err != nil {
+				logger.WithError(err).Error("charts listener failed")
+			}
+		}()
+	}
+
 	if h.DmsgClient != nil {
 		s.startCXO(runCtx, h.DmsgClient, nil, b.st, tpdAPI, sk, logger)
+		tpdAPI.SetDmsgDiscovery(&http.Client{Transport: dmsghttp.MakeHTTPTransport(runCtx, h.DmsgClient)}, dmsgDiscDmsg)
+		if mgr := dmsgdFeed(h.DmsgClient, dmsgDiscDmsg, logger); mgr != nil {
+			tpdAPI.SetDmsgDiscoveryFeed(mgr)
+			defer mgr.Close()
+		}
 	}
 
 	select {
@@ -338,12 +376,12 @@ func (s *service) startCXO(
 	s.cxo.AddPublisher(ctx, logger, "metrics", skyenv.DmsgTPDMetricsCXOPort, mp, err)
 	up, err := api.StartUptimeCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
 	s.cxo.AddPublisher(ctx, logger, "uptime", skyenv.DmsgTPDUptimeCXOPort, up, err)
-	ap, err := api.StartAllTransportsCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
-	s.cxo.AddPublisher(ctx, logger, "all-transports", skyenv.DmsgTPDAllTransportsCXOPort, ap, err)
 	rp, err := api.StartRoutingCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
 	s.cxo.AddPublisher(ctx, logger, "routing", skyenv.DmsgTPDRoutingCXOPort, rp, err)
 	sp, err := api.StartStatsCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
 	s.cxo.AddPublisher(ctx, logger, "stats", skyenv.DmsgTPDStatsCXOPort, sp, err)
+	kp, err := api.StartPerKeyCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
+	s.cxo.AddPublisher(ctx, logger, "perkey", skyenv.DmsgTPDPerKeyCXOPort, kp, err)
 	vp, err := api.StartVisorBWCXOPublisher(ctx, tpdAPI, dmsgC, sk, logger)
 	s.cxo.AddPublisher(ctx, logger, "visorbw", skyenv.DmsgTPDVisorBWCXOPort, vp, err)
 }
@@ -405,4 +443,33 @@ var (
 // AggregatorPorts implements services.CXOAggregating.
 func (s *service) AggregatorPorts() []uint16 {
 	return []uint16{skyenv.DmsgCXOPort, skyenv.DmsgVisorTPListCXOPort}
+}
+
+// chartStore keeps the chart samples next to the transports.
+func (s *service) chartStore(sc storeconfig.Config) (charts.Store, error) {
+	if sc.Type != storeconfig.Redis {
+		return charts.NewMemoryStore(), nil
+	}
+	return charts.NewRedisStore(sc.URL, sc.Password, redisPrefix)
+}
+
+// dmsgdFeed holds dmsg discovery's clients-by-server feed for the marking of
+// dmsg server visors, or returns nil when dmsg discovery has no dmsg key.
+func dmsgdFeed(dmsgC *dmsg.Client, discURL string, log *logging.Logger) *cxosub.Manager {
+	pk := cmdutil.PKFromDmsgURL(discURL)
+	if pk.Null() {
+		return nil
+	}
+	mgr := cxosub.NewManager(cxosub.Deps{
+		Dmsg: func() *dmsg.Client { return dmsgC },
+		FeedSpec: func(f cxosub.Feed) (cipher.PubKey, uint16, string, error) {
+			if f != cxosub.FeedDMSGDClientsByServer {
+				return cipher.PubKey{}, 0, "", fmt.Errorf("feed %s is not held here", cxosub.FeedString(f))
+			}
+			return pk, skyenv.DmsgDMSGDClientsByServerCXOPort, serverfeed.Prefix, nil
+		},
+		Log: log,
+	}, 0)
+	mgr.Pin(cxosub.FeedDMSGDClientsByServer)
+	return mgr
 }

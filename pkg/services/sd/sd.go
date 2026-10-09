@@ -17,6 +17,7 @@ import (
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/cxo/node"
 	"github.com/skycoin/skywire/pkg/cxo/storeconfig"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/deployment/sd/api"
 	sdmetrics "github.com/skycoin/skywire/pkg/deployment/sd/metrics"
 	"github.com/skycoin/skywire/pkg/deployment/sd/regcxo"
@@ -59,6 +60,8 @@ type service struct {
 	// state, set by build and startCXO, is reported by State.
 	store, nonceStore string
 	cxo               services.CXOSet
+	// stats, set by Run, counts the process and its traffic for the status page.
+	stats *charts.ServiceStats
 }
 
 // State implements services.Stater.
@@ -145,6 +148,8 @@ func (s *service) build(ctx context.Context, log *logging.Logger, dmsgAddr strin
 	}
 
 	go sdAPI.RunBackgroundTasks(ctx, log)
+	sdAPI.Stats = s.stats
+	sdAPI.StartCharts(ctx, s.chartStore(storeType, redisURL, log), log)
 	return sdAPI, nil
 }
 
@@ -182,6 +187,8 @@ func (s *service) Embed(ctx context.Context, host services.Host) (http.Handler, 
 func (s *service) Run(ctx context.Context) error {
 	cfg := s.cfg
 	log := services.NewLogger(cfg.LogTag("service_discovery"), cfg.LogLevel)
+	s.stats = charts.NewServiceStats("service discovery")
+	s.cxo.Stats = s.stats
 	defer cfg.StartPprof(log)()
 
 	pk := cfg.PubKey
@@ -229,6 +236,7 @@ func (s *service) Run(ctx context.Context) error {
 		addr = ":9098"
 	}
 	h, err := svcmode.Start(runCtx, svcmode.Config{
+		Stats:               s.stats,
 		Mode:                resolvedMode,
 		HTTPAddr:            addr,
 		Handler:             sdAPI,
@@ -248,6 +256,15 @@ func (s *service) Run(ctx context.Context) error {
 		return fmt.Errorf("service-discovery: start listeners: %w", err)
 	}
 	defer h.Close()
+
+	if cfg.ChartsAddr != "" {
+		log.Infof("Serving the charts page on %s", cfg.ChartsAddr)
+		go func() {
+			if err := charts.Serve(runCtx, cfg.ChartsAddr, http.HandlerFunc(sdAPI.ChartsPage)); err != nil {
+				log.WithError(err).Error("charts listener failed")
+			}
+		}()
+	}
 
 	if h.DmsgClient != nil {
 		s.startCXO(runCtx, h.DmsgClient, nil, sdAPI, sk, log)
@@ -316,4 +333,17 @@ func (s *service) startServicesCXO(
 // AggregatorPorts implements services.CXOAggregating.
 func (s *service) AggregatorPorts() []uint16 {
 	return []uint16{skyenv.DmsgVisorSDRegCXOPort}
+}
+
+// chartStore keeps the chart samples next to the service entries.
+func (s *service) chartStore(t storeconfig.Type, redisURL string, log *logging.Logger) charts.Store {
+	if t != storeconfig.Redis {
+		return charts.NewMemoryStore()
+	}
+	st, err := charts.NewRedisStore(redisURL, storeconfig.RedisPassword(), redisPrefix)
+	if err != nil {
+		log.WithError(err).Warn("charts: redis unavailable, keeping samples in memory")
+		return charts.NewMemoryStore()
+	}
+	return st
 }

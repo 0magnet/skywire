@@ -765,6 +765,7 @@ type router struct {
 	pending          *pendingPackets                                 // frames parked during the rule-save -> route-group-register window (see router_pending.go)
 	pendingLegs      *pendingLegs                                    // aux mux legs buffered while their route group is still initializing (see router_pending_legs.go, #80)
 	rpcSrv           *rpc.Server
+	directSetup      directSetupState // peers that refused a one-hop setup without a setup node (direct_setup.go)
 	accept           chan routing.EdgeRules
 	adopted          chan net.Conn
 	done             chan struct{}
@@ -801,6 +802,11 @@ type router struct {
 	// → the oracle path is inert. Set via SetDstTransportOracle.
 	dstTpOracle   DstTransportOracle
 	dstTpOracleMu sync.Mutex
+
+	// tpListFetcher reads other visors' signed transport lists over transports
+	// for 3-hop routes. Set via SetTransportListFetcher.
+	tpListFetcher TransportListFetcher
+	tpListMu      sync.Mutex
 }
 
 // DstTransportOracle fetches a destination visor's OWN transport list

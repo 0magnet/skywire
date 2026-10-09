@@ -32,6 +32,7 @@ import (
 
 	"github.com/skycoin/skywire/deployment"
 	"github.com/skycoin/skywire/pkg/cipher"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/dmsg/direct"
 	"github.com/skycoin/skywire/pkg/dmsg/disc"
 	"github.com/skycoin/skywire/pkg/dmsg/disc/metrics"
@@ -81,6 +82,8 @@ func New(cfg *Config, log *logging.Logger) services.Service {
 type service struct {
 	cfg *Config
 	log *logging.Logger
+	// stats, set by Run, counts the process and its traffic for the status page.
+	stats *charts.ServiceStats
 }
 
 // Run is the long-lived run loop. Returns when ctx cancels or a
@@ -97,6 +100,7 @@ type service struct {
 func (s *service) Run(ctx context.Context) error {
 	cfg := s.cfg
 	log := services.NewLogger(cfg.LogTag("dmsg_disc"), cfg.LogLevel)
+	s.stats = charts.NewServiceStats("dmsg discovery")
 
 	pk, sk := cfg.PubKey, cfg.SecKey
 	if pk.Null() && !sk.Null() {
@@ -152,6 +156,16 @@ func (s *service) Run(ctx context.Context) error {
 	defer cancel()
 
 	go a.RunBackgroundTasks(runCtx, log)
+	a.Stats = s.stats
+	a.StartCharts(runCtx, chartStore(cfg, log), log)
+	if cfg.ChartsAddr != "" {
+		log.WithField("addr", cfg.ChartsAddr).Info("Serving the charts page...")
+		go func() {
+			if err := charts.Serve(runCtx, cfg.ChartsAddr, http.HandlerFunc(a.ChartsPage)); err != nil {
+				log.WithError(err).Error("charts listener failed")
+			}
+		}()
+	}
 
 	addr := cfg.Addr
 	if addr == "" {
@@ -159,7 +173,7 @@ func (s *service) Run(ctx context.Context) error {
 	}
 	log.WithField("addr", addr).Info("Serving discovery API...")
 	go func() {
-		if listenErr := listenAndServe(addr, a); listenErr != nil {
+		if listenErr := listenAndServe(addr, s.stats.Handler(a)); listenErr != nil {
 			log.Errorf("ListenAndServe: %v", listenErr)
 			cancel()
 		}
@@ -174,6 +188,9 @@ func (s *service) Run(ctx context.Context) error {
 	<-runCtx.Done()
 	return nil
 }
+
+// serverHealthFetchTimeout bounds one server's /health read for the status page.
+const serverHealthFetchTimeout = 15 * time.Second
 
 func (s *service) runDMSG(
 	ctx context.Context,
@@ -256,7 +273,11 @@ func (s *service) runDMSG(
 	// separate :81 listener. The ring buffer captures recent global-logger output.
 	rb := logging.NewRingBuffer(0)
 	logging.AddHook(logging.NewWriteHook(rb))
-	handler := dmsghttp.WithDebug(a, wl, rb.Bytes)
+	s.stats.CountDmsg(dmsgDC)
+	a.SetServerHealthClient(&http.Client{Transport: dmsghttp.MakeHTTPTransport(ctx, dmsgDC), Timeout: serverHealthFetchTimeout})
+	s.stats.NamePort(dmsg.DefaultDmsgHTTPPort, "http")
+	s.stats.NamePort(skyenv.DmsgDMSGDClientsByServerCXOPort, "cxo clients-by-server")
+	handler := dmsghttp.WithDebug(s.stats.Handler(a), wl, rb.Bytes)
 	go func() {
 		if dmsgErr := dmsghttp.ListenAndServe(ctx, sk, handler, dClient, dmsg.DefaultDmsgHTTPPort, dmsgDC, log); dmsgErr != nil {
 			log.Errorf("dmsghttp.ListenAndServe: %v", dmsgErr)
@@ -275,6 +296,7 @@ func (s *service) runDMSG(
 		// subscriber connecting in the post-restart gap times out at
 		// firstSyncTimeout (10s).
 		a.WarmCXOFromStore(ctx, log)
+		go a.RunServersCXO(ctx, log)
 		go func() {
 			<-ctx.Done()
 			pub.Close() //nolint:errcheck,gosec
@@ -534,4 +556,22 @@ func listenAndServe(addr string, handler http.Handler) error {
 // rejects every header-less connection with ErrNoProxyProtocol.
 func optionalProxyHeader(proxyproto.ConnPolicyOptions) (proxyproto.Policy, error) {
 	return proxyproto.USE, nil
+}
+
+// chartStore keeps the chart samples in the discovery's redis, or in memory
+// where the discovery itself runs without one.
+func chartStore(cfg *Config, log *logging.Logger) charts.Store {
+	if cfg.Testing && cfg.Redis == "" {
+		return charts.NewMemoryStore()
+	}
+	url := cfg.Redis
+	if url == "" {
+		url = store.DefaultURL
+	}
+	st, err := charts.NewRedisStore(url, os.Getenv(RedisPasswordEnvName), "dmsg-discovery")
+	if err != nil {
+		log.WithError(err).Warn("charts: redis unavailable, keeping samples in memory")
+		return charts.NewMemoryStore()
+	}
+	return st
 }

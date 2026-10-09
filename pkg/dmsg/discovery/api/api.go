@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/skycoin/skywire/pkg/buildinfo"
 	"github.com/skycoin/skywire/pkg/cipher"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/deployment/monitor/nmpk"
 	"github.com/skycoin/skywire/pkg/dmsg/disc"
 	"github.com/skycoin/skywire/pkg/dmsg/disc/metrics"
@@ -43,6 +45,12 @@ const maxBatchEntriesKeys = 1000
 
 // API represents the api of the dmsg-discovery service`
 type API struct {
+	// Stats, when set, adds the process and traffic charts to the status page.
+	Stats *charts.ServiceStats
+
+	// srvHealth reads registered servers' load for the status page.
+	srvHealth atomic.Pointer[serverHealth]
+
 	http.Handler
 	metrics                     metrics.Metrics
 	db                          store.Storer
@@ -54,6 +62,9 @@ type API struct {
 	DmsgServers                 []string
 	authPassphrase              string
 	OfficialServers             map[string]bool
+
+	// chartsPage is set once StartCharts runs; until then / answers 404.
+	chartsPage atomic.Pointer[charts.Page]
 
 	// dhtMirror mirrors entries to the DHT under the visor's PK-derived
 	// target. The mirror signs with its own key but stores under the
@@ -185,6 +196,7 @@ func New(log logrus.FieldLogger, db store.Storer, m metrics.Metrics, testMode, e
 	r.Get("/uptimes", api.getUptimes)
 	r.Post("/uptimes", api.postUptimes)
 	r.Get("/health", api.serviceHealth)
+	r.Get("/", api.ChartsPage)
 
 	return api
 }

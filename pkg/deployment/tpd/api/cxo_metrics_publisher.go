@@ -50,6 +50,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -129,11 +130,10 @@ type MetricsCXOPublisher struct {
 func StartMetricsCXOPublisher(ctx context.Context, api *API, dmsgC *dmsg.Client, sk cipher.SecKey, logger logrus.FieldLogger) (*MetricsCXOPublisher, error) {
 	log := logging.MustGetLogger("tpd-cxo-metrics-pub")
 
-	pub, err := treestore.NewWithDMSG(dmsgC, sk, treestore.PubConfig{
-		Logger:     log,
-		InMemoryDB: true, // metrics are always recomputed from redis on the next tick
-		DmsgPort:   skyenv.DmsgTPDMetricsCXOPort,
-	})
+	// Thirty days of leaves, several MB each, would otherwise sit in the heap
+	// twice, in the tree and in the object store. On disk the store's copy
+	// is page cache the kernel can drop.
+	pub, err := treestore.NewWithDMSG(dmsgC, sk, metricsPubConfig(log, api.backupPath))
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +157,16 @@ func StartMetricsCXOPublisher(ctx context.Context, api *API, dmsgC *dmsg.Client,
 	}
 	go mp.loop(pubCtx)
 	return mp, nil
+}
+
+// metricsPubConfig keeps the store under dataPath/cxo-metrics, or in memory
+// when there is no data path.
+func metricsPubConfig(log *logging.Logger, dataPath string) treestore.PubConfig {
+	conf := treestore.PubConfig{Logger: log, InMemoryDB: true, DmsgPort: skyenv.DmsgTPDMetricsCXOPort}
+	if dataPath != "" {
+		conf.InMemoryDB, conf.DataDir = false, filepath.Join(dataPath, "cxo-metrics")
+	}
+	return conf
 }
 
 // FeedPK returns the publisher's feed PK — i.e. TPD's own PK, since
@@ -220,11 +230,11 @@ func (m *MetricsCXOPublisher) publish(ctx context.Context, full bool) {
 	saved := map[string][][]byte{}
 	if full {
 		// Settled days an earlier run saved need no recompute; only when one
-		// is missing is the whole window read.
+		// is missing is the whole window read. The saved days still win over
+		// the reread, whose rows for older days may already be cleaned up.
 		saved = m.loadSettled(ctx, window[open:])
 		if len(saved) < len(window)-open {
 			days = metricsWindowDays
-			saved = map[string][][]byte{}
 		}
 	}
 	metrics, err := m.fetch(ctx, days)
@@ -239,6 +249,13 @@ func (m *MetricsCXOPublisher) publish(ctx context.Context, full bool) {
 
 	fresh := window[:days]
 	byDate := store.PivotDailyMetrics(metrics, fresh)
+	if days > open {
+		perDay := make(map[string]int, len(fresh))
+		for _, d := range fresh {
+			perDay[d] = len(byDate[d])
+		}
+		m.log.WithField("transports", len(metrics)).WithField("per_day", perDay).Info("Rebuilt the metrics window")
+	}
 
 	bodies := make(map[string][][]byte, len(fresh))
 	for _, date := range fresh {
@@ -263,7 +280,15 @@ func (m *MetricsCXOPublisher) publish(ctx context.Context, full bool) {
 		return
 	}
 	m.parts = next
-	m.settle(ctx, bodies, window[:open])
+	// Days loaded from the store are saved already; saving them again would
+	// rewrite every archived day and return old ones to redis on each start.
+	built := make(map[string][][]byte, len(bodies))
+	for date, parts := range bodies {
+		if _, ok := saved[date]; !ok {
+			built[date] = parts
+		}
+	}
+	m.settle(ctx, built, window[:open])
 }
 
 // planDayOps turns one cycle's gzipped bodies into the PutBatch that
@@ -523,7 +548,21 @@ func (m *MetricsCXOPublisher) loadSettled(ctx context.Context, dates []string) m
 		m.log.WithError(err).Debug("could not load saved metrics leaves; rebuilding the window")
 		return map[string][][]byte{}
 	}
+	for date, parts := range got {
+		if emptyLeaf(parts) {
+			m.log.WithField("date", date).Warn("saved metrics day holds no transports; rebuilding it")
+			delete(got, date)
+		}
+	}
 	return got
+}
+
+// emptyLeaf reports whether a day's parts hold no transport, or do not decode.
+// The network never has a day without traffic, so such a leaf was built from a
+// read that missed the day's rows.
+func emptyLeaf(parts [][]byte) bool {
+	records, err := decodeMetricsParts(parts)
+	return err != nil || len(records) == 0
 }
 
 // settle remembers the bodies of days still open and saves every day that
@@ -539,6 +578,12 @@ func (m *MetricsCXOPublisher) settle(ctx context.Context, bodies map[string][][]
 	ls, ok := m.api.store.(leafStore)
 	for date, parts := range m.unsaved {
 		if isOpen[date] {
+			continue
+		}
+		if emptyLeaf(parts) {
+			// Not saved, so the next start rebuilds the day from its rows.
+			m.log.WithField("date", date).Warn("settled metrics day holds no transports; not saving it")
+			delete(m.unsaved, date)
 			continue
 		}
 		if ok {

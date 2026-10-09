@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -15,7 +16,9 @@ import (
 	"github.com/sirupsen/logrus"
 
 	"github.com/skycoin/skywire/pkg/cipher"
+	"github.com/skycoin/skywire/pkg/deployment/charts"
 	"github.com/skycoin/skywire/pkg/deployment/monitor/nmpk"
+	"github.com/skycoin/skywire/pkg/deployment/netgraph"
 	tpdiscmetrics "github.com/skycoin/skywire/pkg/deployment/tpd/metrics"
 	"github.com/skycoin/skywire/pkg/deployment/tpd/store"
 	"github.com/skycoin/skywire/pkg/httpauth"
@@ -53,6 +56,9 @@ var (
 // API register all the API endpoints.
 // It implements a net/http.Handler.
 type API struct {
+	// Stats, when set, adds the process and traffic charts to the status page.
+	Stats *charts.ServiceStats
+
 	http.Handler
 	metrics                     tpdiscmetrics.Metrics
 	reqsInFlightCountMiddleware *metricsutil.RequestsInFlightCountMiddleware
@@ -64,6 +70,11 @@ type API struct {
 	DmsgServers                 []string
 	backupPath                  string
 
+	// charts is set once StartCharts runs; until then / answers 404.
+	chartState atomic.Pointer[tpdCharts]
+	// dmsgRoles is set when TPD can reach dmsg discovery over dmsg.
+	dmsgRoles atomic.Pointer[dmsgRoles]
+
 	transportsCache         []*transport.Entry
 	transportsCacheFiltered []*transport.Entry // excludes self-transports
 	// transportsCacheAt identifies the snapshot the two slices above are.
@@ -72,10 +83,6 @@ type API struct {
 	// whether it is comparing one snapshot or two.
 	transportsCacheAt time.Time
 	transportsMu      sync.RWMutex
-
-	// allTpsRespCache memoizes the marshaled (+gzip) /all-transports body so the
-	// dominant-egress endpoint doesn't re-marshal/re-send ~3MB per call.
-	allTpsRespCache *allTransportsRespCache
 
 	// edgeRespCache memoizes the marshaled (+gzip) /transports/edge:<PK> body
 	// per edge so the second-busiest read endpoint collapses identical repeat
@@ -130,7 +137,6 @@ func New(log logrus.FieldLogger, s store.Store, nonceStore httpauth.NonceStore,
 		dmsgAddr:                    dmsgAddr,
 		DmsgServers:                 []string{},
 		backupPath:                  backupPath,
-		allTpsRespCache:             newAllTransportsRespCache(allTransportsRespCacheTTL),
 		edgeRespCache:               newEdgeRespCache(edgeRespCacheTTL),
 	}
 
@@ -215,6 +221,10 @@ func New(log logrus.FieldLogger, s store.Store, nonceStore httpauth.NonceStore,
 
 	// Infrastructure endpoints (no rate limiting, no auth)
 	r.Get("/health", api.health)
+	r.Get("/", api.ChartsPage)
+	r.Get("/graph", api.GraphPage)
+	r.Get("/graph/engine.wasm", netgraph.EngineWasm)
+	r.Get("/graph/engine.js", netgraph.EngineLoader)
 	r.Post("/statuses", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusGone)
 	})
@@ -379,6 +389,9 @@ func (api *API) RunBackgroundTasks(ctx context.Context, logger logrus.FieldLogge
 	defer backupTicker.Stop()
 
 	api.refreshTransportsCache(ctx, logger)
+	// Deploys restart TPD more often than hourly, so the cleanup also runs
+	// soon after start rather than waiting out its first tick.
+	firstBackup := time.After(2 * time.Minute)
 	api.refreshUptimesCache(ctx, logger)
 
 	for {
@@ -389,6 +402,10 @@ func (api *API) RunBackgroundTasks(ctx context.Context, logger logrus.FieldLogge
 			api.refreshTransportsCache(ctx, logger)
 		case <-uptimesTicker.C:
 			api.refreshUptimesCache(ctx, logger)
+		case <-firstBackup:
+			if err := api.store.BackupAndCleanOldBandwidth(ctx, api.backupPath); err != nil {
+				logger.WithError(err).Error("failed to backup old bandwidth data")
+			}
 		case <-backupTicker.C:
 			if err := api.store.BackupAndCleanOldBandwidth(ctx, api.backupPath); err != nil {
 				logger.WithError(err).Error("failed to backup old bandwidth data")

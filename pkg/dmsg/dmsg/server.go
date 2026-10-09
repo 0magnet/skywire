@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/0magnet/yamux"
-	"github.com/xtaci/smux"
 
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/dmsg/disc"
@@ -691,6 +690,56 @@ func (s *Server) isPeerPK(pk cipher.PubKey) bool {
 	return ok
 }
 
+// isStaticPeer reports whether pk is a peer this server was configured with.
+func (s *Server) isStaticPeer(pk cipher.PubKey) bool {
+	for _, p := range s.peers {
+		if p.PK == pk {
+			return true
+		}
+	}
+	return false
+}
+
+// sessionFilingWait bounds how long an accepted session from a server key
+// waits for its first stream before it is filed as before.
+const sessionFilingWait = 5 * time.Second
+
+// fileSession puts an accepted session in the session map. A session from a
+// key that also runs a dmsg server is held back until its first stream shows
+// what it is. A visor serving dmsg in process connects under one key both as
+// a client and as that server's peer link, and filing both under the key made
+// each replace and close the other, so neither stayed up. A peer link
+// announces itself and is kept only as a peer. A request from the session's
+// own key is a client and stops being treated as a peer. Anything else, or no
+// stream within sessionFilingWait, is filed as it always was.
+func (s *Server) fileSession(ctx context.Context, dSes *SessionCommon) {
+	if !dSes.isPeer || s.isStaticPeer(dSes.RemotePK()) {
+		s.setSession(ctx, dSes)
+		return
+	}
+	dSes.filing = &sessionFiling{file: func(kind filingKind) {
+		switch kind {
+		case notFiled:
+			return
+		case filedClient:
+			dSes.isPeer = false
+		}
+		s.setSession(ctx, dSes)
+	}}
+	time.AfterFunc(sessionFilingWait, func() {
+		// The key's peer link announces itself at once, so a quiet session
+		// beside an announced link is the client.
+		s.peerSessionsMx.Lock()
+		link, ok := s.peerSessions[dSes.RemotePK()]
+		s.peerSessionsMx.Unlock()
+		if ok && link != dSes {
+			dSes.settleFiling(filedClient)
+			return
+		}
+		dSes.settleFiling(filedAsBefore)
+	})
+}
+
 // sendPeerAnnounce opens a stream on the given (outbound) peer session,
 // sends a signed PeerAnnounce, and waits for the remote's ack. Sent on
 // every outbound peer link (peer relaying is always on), so the server —
@@ -796,37 +845,23 @@ func (s *Server) handleSession(conn net.Conn) {
 		hook(s)
 	}
 
-	// detect visor protocol for dmsg
-	protocol := s.entryProtocol(ctx, dSes.RemotePK())
-
-	// based on protocol, create smux or yamux stream session
+	// The stream mux is yamux: a client takes smux only when its server's
+	// entry advertises it (client_sessions.go), and this server never does.
 	dSes.sm.mutx.Lock()
-	if protocol == "smux" {
-		dSes.sm.smux, err = smux.Server(conn, SmuxConfig())
-		if err != nil {
-			dSes.sm.mutx.Unlock()
-			conn.Close() //nolint:errcheck,gosec
-			cancel()
-			return
-		}
-		dSes.sm.addr = dSes.sm.smux.RemoteAddr()
-		log.Debugf("smux stream session initial for %s", dSes.RemotePK().String())
-	} else {
-		dSes.sm.yamux, err = yamux.Server(conn, YamuxConfig())
-		if err != nil {
-			dSes.sm.mutx.Unlock()
-			conn.Close() //nolint:errcheck,gosec
-			cancel()
-			return
-		}
-		dSes.sm.addr = dSes.sm.yamux.RemoteAddr()
-		log.Debugf("yamux stream session initial for %s", dSes.RemotePK().String())
+	dSes.sm.yamux, err = yamux.Server(conn, YamuxConfig())
+	if err != nil {
+		dSes.sm.mutx.Unlock()
+		conn.Close() //nolint:errcheck,gosec
+		cancel()
+		return
 	}
+	dSes.sm.addr = dSes.sm.yamux.RemoteAddr()
+	log.Debugf("yamux stream session initial for %s", dSes.RemotePK().String())
 	dSes.sm.mutx.Unlock()
 
 	// Newest-session-wins: setSession always installs this session
 	// (replacing and closing any stale predecessor), so always serve it.
-	s.setSession(ctx, dSes.SessionCommon)
+	s.fileSession(ctx, dSes.SessionCommon)
 
 	// Shutdown-race guard. The awaitDone goroutine spawned above closes this
 	// session when s.done fires — but SessionCommon.Close only closes a stream
@@ -844,6 +879,7 @@ func (s *Server) handleSession(conn net.Conn) {
 	}
 
 	dSes.Serve()
+	dSes.settleFiling(notFiled)
 
 	// If this inbound session was promoted to a forwardable peer (an
 	// accepted PeerAnnounce from a non-public server), drop it from the
