@@ -17,6 +17,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/skycoin/skywire/deployment"
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/logging"
 	"github.com/skycoin/skywire/pkg/visor/visorconfig"
@@ -121,4 +122,31 @@ func TestExecModuleBeforeTheFirstRefresh(t *testing.T) {
 	path, ok := hv.execModule()
 	require.True(t, ok)
 	require.Equal(t, execwasm.DefaultPath(), path)
+}
+
+// TestWasmModuleSource pins that the deployment names the source, a config
+// overrides it, and a deployment without one means no refresh.
+func TestWasmModuleSource(t *testing.T) {
+	saved := deployment.Prod.WasmModuleSource
+	t.Cleanup(func() { deployment.Prod.WasmModuleSource = saved })
+
+	dep, _ := cipher.GenerateKeyPair()
+	own, _ := cipher.GenerateKeyPair()
+	deployment.Prod.WasmModuleSource = dep.Hex()
+
+	pk, err := wasmModuleSource(nil)
+	require.NoError(t, err)
+	require.Equal(t, dep, pk)
+
+	pk, err = wasmModuleSource(&visorconfig.HypervisorConfig{WasmModuleSource: own.Hex()})
+	require.NoError(t, err)
+	require.Equal(t, own, pk)
+
+	deployment.Prod.WasmModuleSource = ""
+	pk, err = wasmModuleSource(nil)
+	require.NoError(t, err)
+	require.True(t, pk.Null())
+
+	_, err = wasmModuleSource(&visorconfig.HypervisorConfig{WasmModuleSource: "not-a-key"})
+	require.Error(t, err)
 }

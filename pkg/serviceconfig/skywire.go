@@ -19,9 +19,6 @@ const (
 	PublicSetupNode string = "0324579f003e6b4048bae2def4365e634d8e0e3054a20fc7af49daf2a179658557"
 	// PublicAddressResolver is  global address-resolver service
 	PublicAddressResolver string = "https://address.resolver.skywire.skycoin.com"
-	// WasmModuleSource is the visor that serves the current js/wasm module to
-	// every other visor: the one beside theskywirenetwork.net.
-	WasmModuleSource string = "0371ab4bcff7b121f4b91f6856d6740c6f9dc1fe716977850aeb5d84378b300a13"
 )
 
 // SkywireConfig defines configuration of skywire-services

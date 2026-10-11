@@ -15,9 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/skycoin/skywire/deployment"
 	"github.com/skycoin/skywire/pkg/cipher"
 	"github.com/skycoin/skywire/pkg/logging"
-	serviceconfig "github.com/skycoin/skywire/pkg/serviceconfig"
 	"github.com/skycoin/skywire/pkg/visor/visorconfig"
 	"github.com/skycoin/skywire/pkg/wasmhv/execwasm"
 )
@@ -62,7 +62,7 @@ func (v *Visor) wasmModule() *wasmModuleRefresher {
 			v.log.WithError(err).Warn("js/wasm module source is not a public key; the module will not be refreshed")
 			return
 		}
-		if src == v.conf.PK {
+		if src.Null() || src == v.conf.PK {
 			return
 		}
 		path := execwasm.DefaultPath()
@@ -80,13 +80,17 @@ func (v *Visor) wasmModule() *wasmModuleRefresher {
 	return v.wasmModuleRef
 }
 
-// wasmModuleSource is the visor the module is refreshed from.
+// wasmModuleSource is the visor the module is refreshed from, null when the
+// deployment names none.
 func wasmModuleSource(hc *visorconfig.HypervisorConfig) (cipher.PubKey, error) {
-	s := serviceconfig.WasmModuleSource
+	s := deployment.Prod.WasmModuleSource
 	if hc != nil && hc.WasmModuleSource != "" {
 		s = hc.WasmModuleSource
 	}
 	var pk cipher.PubKey
+	if s == "" {
+		return pk, nil
+	}
 	err := pk.Set(s)
 	return pk, err
 }

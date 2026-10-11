@@ -122,7 +122,7 @@ type HypervisorConfig struct {
 	WasmServe *WasmServeConf `json:"wasm_serve,omitempty"`
 	// WasmModuleSource is the visor the js/wasm module served for the desk
 	// is refreshed from when the desk is opened. Empty means
-	// serviceconfig.WasmModuleSource.
+	// the deployment's wasm_module_source.
 	WasmModuleSource string `json:"wasm_module_source,omitempty"`
 }
 
