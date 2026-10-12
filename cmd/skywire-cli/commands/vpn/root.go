@@ -105,6 +105,7 @@ var (
 	useExternal        bool
 	existingTpOnly     bool
 	forceLocalRoutes   bool
+	hostTunnel         bool
 	testEnv            bool
 	startVerbose       bool
 	startVerboseLevel  string
