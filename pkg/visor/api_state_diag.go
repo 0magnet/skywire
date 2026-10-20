@@ -38,6 +38,7 @@ func (v *Visor) DiagSnapshot() *visorapi.DiagSnapshot {
 		d.Runtime.HeapLiveMB = float64(live[0].Value.Uint64()) / (1 << 20)
 	}
 
+	d.Runtime.Census = heapCensus()
 	if n, last := logging.PanicStats(); n > 0 {
 		d.Panics = &visorapi.DiagPanics{Count: n, Last: last}
 	}

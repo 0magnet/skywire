@@ -446,6 +446,8 @@ type DiagRuntime struct {
 	SysMB      float64 `json:"sys_mb"`
 	NumGC      uint32  `json:"num_gc"`
 	GoVersion  string  `json:"go_version"`
+	// Census is an experiment: the TinyGo heap census and its referrers.
+	Census string `json:"census,omitempty"`
 }
 
 // DiagPanics is the recovered-panic accounting. Count keeps rising after Last
