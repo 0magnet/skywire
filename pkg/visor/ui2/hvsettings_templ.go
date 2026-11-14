@@ -6,8 +6,10 @@ package ui2
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
+)
 
 // HVSettingsPage is the hypervisor's own settings, the Angular /settings
 // page: theme, refresh rate, password and the saved labels.

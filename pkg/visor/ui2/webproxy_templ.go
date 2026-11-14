@@ -6,10 +6,12 @@ package ui2
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/skycoin/skywire/pkg/visor/visorapi"
+	"github.com/skycoin/skywire/pkg/visor/visorapi"
+)
 
 // WebProxy is the web proxy tab: the resolving proxies for .dmsg and
 // .skynet, as web-proxy.component.ts.
