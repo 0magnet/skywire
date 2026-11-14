@@ -120,7 +120,7 @@ func (s *Server) Serve(l net.Listener) error {
 	serveErr := errors.New("already serving")
 	s.serveOnce.Do(func() {
 		s.setAppStatus(appserver.AppDetailedStatusStarting)
-		if err := EnableIPv4Forwarding(); err != nil {
+		if err := EnableIPv4Forwarding(s.log); err != nil {
 			serveErr = fmt.Errorf("error enabling IPv4 forwarding: %w", err)
 			return
 		}
@@ -138,7 +138,7 @@ func (s *Server) Serve(l net.Listener) error {
 			s.revertIPv6ForwardingValue()
 		}()
 
-		if err := EnableIPMasquerading(s.defaultNetworkInterface); err != nil {
+		if err := EnableIPMasquerading(s.log, s.defaultNetworkInterface); err != nil {
 			serveErr = fmt.Errorf("error enabling IP masquerading for %s: %w", s.defaultNetworkInterface, err)
 			return
 		}
@@ -224,7 +224,7 @@ func (s *Server) Close() error {
 }
 
 func (s *Server) revertIPv4ForwardingValue() {
-	if err := SetIPv4ForwardingValue(s.ipv4ForwardingVal); err != nil {
+	if err := SetIPv4ForwardingValue(s.log, s.ipv4ForwardingVal); err != nil {
 		s.log.WithError(err).Error("Error reverting IPv4 forwarding")
 	} else {
 		s.log.Infof("Set IPv4 forwarding = %s", s.ipv4ForwardingVal)
@@ -240,7 +240,7 @@ func (s *Server) revertIPv6ForwardingValue() {
 }
 
 func (s *Server) disableIPMasquerading() {
-	if err := DisableIPMasquerading(s.defaultNetworkInterface); err != nil {
+	if err := DisableIPMasquerading(s.log, s.defaultNetworkInterface); err != nil {
 		s.log.WithError(err).Errorf("Error disabling IP masquerading for %s", s.defaultNetworkInterface)
 	} else {
 		s.log.Infof("Disabled IP masquerading for %s", s.defaultNetworkInterface)
