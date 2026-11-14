@@ -744,7 +744,33 @@ document.addEventListener('DOMContentLoaded', function () {
 		var x = new Uint8Array(a);
 		return x.length === b.length && x.every(function (v, i) { return v === b[i]; });
 	}
+	// A frame from another origin, such as a desk's browser, cannot ask for
+	// notification permission. The desk subscribes for it (pkg/wasmhv/browse-transport.js).
+	function viaDesk(op, key) {
+		var framed = window.parent !== window;
+		try { if (framed && window.parent.location.href) framed = false; } catch (e) { /* cross-origin */ }
+		if (!framed) return Promise.resolve(null);
+		var id = Math.random().toString(36).slice(2);
+		return new Promise(function (resolve, reject) {
+			var timer = setTimeout(function () { done(); resolve(null); }, 1500);
+			function done() { clearTimeout(timer); window.removeEventListener('message', on); }
+			function on(e) {
+				var d = e.data || {};
+				if (e.source !== window.parent || d.type !== 'skywire-push-reply' || d.id !== id) return;
+				if (d.ack) { clearTimeout(timer); return; }
+				done();
+				if (d.error) reject(new Error(d.error)); else resolve(d);
+			}
+			window.addEventListener('message', on);
+			window.parent.postMessage({ type: 'skywire-push', id: id, op: op, key: key || '' }, '*');
+		});
+	}
 	function subscribe(f) {
+		return viaDesk('subscribe', f.dataset.pushKey).then(function (d) {
+			return d ? { toJSON: function () { return d.sub; } } : subscribeHere(f);
+		});
+	}
+	function subscribeHere(f) {
 		return Notification.requestPermission().then(function (perm) {
 			if (perm !== 'granted') throw new Error(f.dataset.blocked);
 			return registration();
@@ -759,6 +785,11 @@ document.addEventListener('DOMContentLoaded', function () {
 		});
 	}
 	function endpoint() {
+		return viaDesk('endpoint').catch(function () { return null; }).then(function (d) {
+			return d ? d.endpoint || '' : endpointHere();
+		});
+	}
+	function endpointHere() {
 		if (!('serviceWorker' in nav)) return Promise.resolve('');
 		return nav.serviceWorker.getRegistration('/').then(function (reg) {
 			return reg && reg.pushManager ? reg.pushManager.getSubscription() : null;
