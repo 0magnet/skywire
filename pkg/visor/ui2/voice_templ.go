@@ -6,8 +6,10 @@ package ui2
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
+)
 
 // ChatVoice is the call strip above the conversation: ringing calls, the
 // call being placed, and the call in progress with its level meter, mute

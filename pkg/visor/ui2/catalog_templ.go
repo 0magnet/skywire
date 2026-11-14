@@ -6,10 +6,12 @@ package ui2
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/skycoin/skywire/pkg/visor/visorapi"
+	"github.com/skycoin/skywire/pkg/visor/visorapi"
+)
 
 // CatalogPage is the apps tab's catalog view: every app the visor can run,
 // with its configured instances.

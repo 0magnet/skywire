@@ -6,8 +6,10 @@ package ui2
 
 //lint:file-ignore SA4006 This context is only used if a nested component is present.
 
-import "github.com/a-h/templ"
-import templruntime "github.com/a-h/templ/runtime"
+import (
+	"github.com/a-h/templ"
+	templruntime "github.com/a-h/templ/runtime"
+)
 
 // BulkBar is the selection bar of the visor list. ui2.js shows it while
 // visors are ticked and keeps one hidden pk input per ticked visor in it.
