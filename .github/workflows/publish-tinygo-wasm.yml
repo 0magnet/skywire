@@ -1,0 +1,71 @@
+name: Publish TinyGo Wasm
+
+# The browser module built with the TinyGo fork, published to the rolling
+# <branch>-latest pre-release beside the Go module as skywire-tinygo.wasm.gz,
+# its manifest skywire-tinygo.wasm.json and the matching wasm_exec_tinygo.js.
+# The Go module's assets and SHA256SUMS, which the updater reads, are not
+# touched. A build takes most of an hour, so it runs in its own workflow:
+# a run in progress finishes, and only the newest waiting head builds next.
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-tinygo-wasm-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: '1.27.x'
+  TINYGO_RELEASE: v0.44.0-skywire.3
+  TINYGO_SHA256: 667abf8bc745f74ef4902d952c91ff7e22beb966d766479176c9be4d631fe8cf
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Install the TinyGo fork
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o tinygo.tar.gz "https://github.com/0magnet/tinygo/releases/download/${TINYGO_RELEASE}/tinygo.linux-amd64.tar.gz"
+          echo "${TINYGO_SHA256}  tinygo.tar.gz" | sha256sum -c -
+          tar -xzf tinygo.tar.gz
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          sudo apt-get update && sudo apt-get install -y time
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          tinygo version
+          VERSION="$(git describe --always --match 'v[0-9]*')"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          /usr/bin/time -v sh scripts/tinygo-wasm.sh dist "${VERSION}-tinygo" 2> "$RUNNER_TEMP/time.txt" || { cat "$RUNNER_TEMP/time.txt"; exit 1; }
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/time.txt"
+          ( cd dist && sha256sum -- skywire-tinygo.wasm.gz skywire-tinygo.wasm.json wasm_exec_tinygo.js > SHA256SUMS-tinygo )
+          ls -l dist
+
+      - name: Upload to the rolling pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}-latest"
+          # Publish Binary creates the release. Wait for it on a fresh repo.
+          for i in $(seq 1 30); do gh release view "${TAG}" >/dev/null 2>&1 && break; sleep 60; done
+          gh release upload "${TAG}" dist/skywire-tinygo.wasm.gz dist/skywire-tinygo.wasm.json dist/wasm_exec_tinygo.js dist/SHA256SUMS-tinygo --clobber

@@ -117,3 +117,58 @@ jobs:
         with:
           name: skywire-${{ matrix.goos }}-${{ matrix.arch }}-tinygo
           path: ${{ runner.temp }}/dist
+
+  # The browser module, with the wasm_exec.js that matches the toolchain.
+  wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Checkout skywire at the tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Install the TinyGo fork
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"
+          curl -fsSL -o tinygo.tar.gz "https://github.com/0magnet/tinygo/releases/download/${TINYGO_RELEASE}/tinygo.linux-amd64.tar.gz"
+          echo "${TINYGO_SHA256}  tinygo.tar.gz" | sha256sum -c -
+          tar -xzf tinygo.tar.gz
+          echo "$RUNNER_TEMP/tinygo/bin" >> "$GITHUB_PATH"
+          sudo apt-get update && sudo apt-get install -y time
+
+      - name: Build
+        run: |
+          set -euo pipefail
+          tinygo version
+          /usr/bin/time -v sh scripts/tinygo-wasm.sh "$RUNNER_TEMP/out" "${RELEASE_TAG}-tinygo" 2> "$RUNNER_TEMP/time.txt" || { cat "$RUNNER_TEMP/time.txt"; exit 1; }
+          grep -E "Elapsed|Maximum resident" "$RUNNER_TEMP/time.txt"
+          name="skywire-${RELEASE_TAG}-js-wasm-tinygo"
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp "$RUNNER_TEMP/out/skywire-tinygo.wasm.gz" "$RUNNER_TEMP/dist/$name.wasm.gz"
+          cp "$RUNNER_TEMP/out/wasm_exec_tinygo.js" "$RUNNER_TEMP/dist/$name-wasm_exec.js"
+          cd "$RUNNER_TEMP/dist"
+          for f in *; do sha256sum "$f" > "$f.sha256"; done
+          ls -l
+
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" "$RUNNER_TEMP"/dist/* --repo ${{ github.repository }} --clobber
+
+      - name: Keep as a workflow artifact
+        if: ${{ !(startsWith(github.ref, 'refs/tags/') || inputs.tag != '') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: skywire-js-wasm-tinygo
+          path: ${{ runner.temp }}/dist
