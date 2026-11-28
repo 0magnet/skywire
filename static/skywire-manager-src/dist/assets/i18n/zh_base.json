@@ -2300,7 +2300,10 @@
       "read-only": "Only admins can post",
       "listed": "Listed in the catalog",
       "rotate": "New room key",
-      "rotate-confirm": "Make a new room key? Members get it automatically."
+      "rotate-confirm": "Make a new room key? Members get it automatically.",
+      "pick-picture": "Choose a picture",
+      "picture-too-big": "That picture does not fit in 32 KiB even at low quality. Try a simpler one.",
+      "not-an-image": "That file is not an image this browser can read."
     },
     "errors": {
       "visor-unavailable": "Visor unavailable.",

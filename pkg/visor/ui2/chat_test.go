@@ -216,3 +216,16 @@ func TestChatSenderAndRole(t *testing.T) {
 	c.Names = map[string]string{peer.Hex(): "Bob"}
 	require.Contains(t, renderEN(t, ChatRoomLog(c)), ">Bob<")
 }
+
+func TestChatAvatarPick(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	c := Chat{PK: pk.Hex(), Profile: &visorapi.Profile{Name: "Me", Avatar: "data:image/png;base64,aGk="}}
+	out := renderEN(t, ChatSettings(c))
+	require.Contains(t, out, "data-avatar-pick")
+	require.Contains(t, out, `name="avatar"`)
+	require.Contains(t, out, "Remove picture")
+	g := visorapi.GroupInfo{ID: "g1", Name: "room", Role: "owner", OwnerPK: pk, Status: "active"}
+	c = Chat{PK: pk.Hex(), Mode: "groups", Groups: []visorapi.GroupInfo{g}}
+	c.Group = &c.Groups[0]
+	require.Contains(t, renderEN(t, ChatRoomInfo(c)), `name="action" value="avatar"`)
+}

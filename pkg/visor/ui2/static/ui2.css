@@ -685,3 +685,7 @@ fieldset.choice legend { padding: 0; margin-bottom: 4px; }
 .tg-hit:hover { background: rgba(var(--fg), 0.06); }
 .tg-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .tg-check input { width: auto; }
+.tg-pick { position: relative; display: inline-flex; align-self: center; cursor: pointer; border-radius: 50%; }
+.tg-pick input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.tg-pick-icon { position: absolute; right: 0; bottom: 0; width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: var(--accent-fg); font-size: 18px; }
+.tg-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }

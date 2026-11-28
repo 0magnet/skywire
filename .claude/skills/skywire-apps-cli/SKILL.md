@@ -39,6 +39,7 @@ is equivalent).
 | `history` | Print persisted 1:1 history (`/history`) | `--peer`, `--limit` (1-1000, def 100), `--since <dur>` | no |
 | `status` | skychat app health snapshot (`/status`) | (global `--json`) | no |
 | `alias` | Local PK addressbook (`$XDG_CONFIG_HOME/skywire/skychat-aliases.json`) | `add NAME PK`, `ls`, `rm NAME` | local file only |
+| `profile` | This visor's skychat display name and picture (visor RPC), or a peer's | `show`, `set [--name N] [--avatar FILE \| --clear-avatar] [--clear]` (picture at most 256x256 px and 32 KiB), `fetch <pk>` | `set` writes |
 | `chat` | Interactive bubbletea TUI (picker or `-t` 1:1) | `-t/--to`, `-n/--net` | TTY |
 | `send-file <path>` | Send a file P2P over transport | `-t/--to`, `-g/--group` | yes |
 | `pair …` | CXO-backed 1:1 (needs app `--pair-enable`) | see pair table | yes (add/send/…) |
