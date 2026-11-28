@@ -98,3 +98,37 @@ func TestChatRender(t *testing.T) {
 	require.Contains(t, out, "data-tick")
 	require.Contains(t, out, `name="network"`)
 }
+
+func TestChatGroupReply(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	peer, _ := cipher.GenerateKeyPair()
+	ts := time.Date(2026, 11, 28, 10, 0, 0, 123, time.UTC)
+	parent := GroupMsgID(peer.Hex(), ts.Format(time.RFC3339Nano))
+	body, err := GroupReplyBody("sure", parent, "can you check?")
+	require.NoError(t, err)
+	require.Contains(t, body, `"skychat_reply"`)
+	require.Contains(t, body, `"to_ts":"`+ts.Format(time.RFC3339Nano)+`"`)
+	_, err = GroupReplyBody("x", "nope", "")
+	require.Error(t, err)
+
+	g := visorapi.GroupInfo{ID: "g1", Name: "room"}
+	c := Chat{PK: pk.Hex(), Mode: "groups", Groups: []visorapi.GroupInfo{g}}
+	c.Group = &c.Groups[0]
+	c.GMsgs = []visorapi.GroupMessage{
+		{GroupID: "g1", SenderPK: peer, Text: "can you check?", TS: ts},
+		{GroupID: "g1", SenderPK: pk, Text: body, TS: ts.Add(time.Minute)},
+	}
+	c.AllGMsgs = c.GMsgs
+	ls := c.Lines(renderCtx(), ts)
+	require.Equal(t, parent, ls[0].ID)
+	require.Equal(t, "sure", ls[1].Text)
+	require.Equal(t, "can you check?", ls[1].Quote)
+	require.Equal(t, parent, ls[1].ReplyTo, "the quote finds its parent")
+	require.Equal(t, "sure", c.RoomRows()[0].Preview)
+
+	c.Notify = &ChatNotify{Enabled: true, Muted: []string{"g1"}}
+	out := renderEN(t, ChatPage(c))
+	require.Contains(t, out, `id="chat-notify"`)
+	require.Contains(t, out, "Unmute notifications for this chat")
+	require.Contains(t, out, `data-reply-preview`)
+}

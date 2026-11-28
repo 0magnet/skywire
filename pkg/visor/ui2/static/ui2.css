@@ -495,6 +495,7 @@ fieldset.choice legend { padding: 0; margin-bottom: 4px; }
 .tg-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tg-name.mono { font-weight: 400; font-size: 0.85em; }
 .tg-lock { font-size: 16px; color: rgba(var(--fg), 0.6); }
+.tg-off { color: rgba(var(--fg), 0.5); }
 .tg-time { font-size: 0.75em; color: rgba(var(--fg), 0.6); flex-shrink: 0; }
 .tg-preview { flex: 1; min-width: 0; font-size: 0.9em; color: rgba(var(--fg), 0.65); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tg-you { color: var(--accent); }

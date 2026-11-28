@@ -2266,7 +2266,12 @@
       "admin": "管理员",
       "offered": "已提供",
       "parked": "已暂存",
-      "held": "已保留"
+      "held": "已保留",
+      "notify-muted": "通知已静音",
+      "notify-on": "开启通知",
+      "notify-off": "关闭通知",
+      "mute-chat": "将此聊天的通知静音",
+      "unmute-chat": "取消此聊天的通知静音"
     },
     "errors": {
       "visor-unavailable": "节点不可用。",

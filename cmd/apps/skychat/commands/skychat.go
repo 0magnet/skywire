@@ -898,6 +898,7 @@ func RunSkychat(ctx context.Context, args []string) error {
 	// expects to see names rather than keys.
 	openContactStore(contactStorePath())
 	openPrivacyStore(privacyStorePath())
+	openMuteStore(muteStorePath())
 	openDeleteOutbox(deleteOutboxPath())
 
 	if persistEnabled {
@@ -1094,6 +1095,7 @@ func RunSkychat(ctx context.Context, args []string) error {
 	registerCallLogHandler(mux)
 	registerContactHandlers(mux)
 	registerPrivacyHandlers(mux)
+	mux.HandleFunc("/notify-settings", requireAuthFunc(notifySettingsHandler))
 	registerTransferHandlers(mux)
 	registerPresenceHTTPHandlers(mux)
 	startPresenceLoop(ctx)

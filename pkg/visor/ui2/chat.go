@@ -4,6 +4,7 @@ package ui2
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"hash/fnv"
 	"path"
 	"sort"
@@ -83,6 +84,9 @@ type Chat struct {
 	GMsgs    []visorapi.GroupMessage
 	AllGMsgs []visorapi.GroupMessage
 	Invite   string
+
+	// Notify is the skychat notification settings, nil on a skychat without them.
+	Notify *ChatNotify
 
 	// Requests are the open join requests of Group, for its admins.
 	Requests []visorapi.GroupJoinRequest
@@ -335,7 +339,7 @@ func (c Chat) RoomRows() []ChatRow {
 		mine := m.SenderPK.Hex() == c.PK
 		if !m.TS.Before(r.Time) || r.Preview == "" {
 			r.Time, r.Mine = m.TS, mine
-			r.Preview = chatClip(m.Text, 60)
+			r.Preview = chatClip(groupText(m.Text), 60)
 			if n := c.NameOf(m.SenderPK.Hex()); n != "" && !mine {
 				r.Preview = n + ": " + r.Preview
 			}
@@ -391,7 +395,12 @@ func (c Chat) Lines(ctx context.Context, now time.Time) []ChatLine {
 	var ls []ChatLine
 	if c.Mode == "groups" {
 		for _, m := range c.GMsgs {
-			ls = append(ls, ChatLine{From: m.SenderPK.Hex(), Out: m.SenderPK.Hex() == c.PK, Text: m.Text, TS: m.TS})
+			l := ChatLine{ID: GroupMsgID(m.SenderPK.Hex(), m.TS.Format(time.RFC3339Nano)), From: m.SenderPK.Hex(), Out: m.SenderPK.Hex() == c.PK, Text: m.Text, TS: m.TS}
+			if r, ok := ParseGroupReply(m.Text); ok {
+				l.Text, l.Quote = r.Text, chatClip(r.ToPreview, 80)
+				l.ReplyTo = GroupMsgID(r.ToSender, r.ToTS)
+			}
+			ls = append(ls, l)
 		}
 	} else {
 		for _, m := range c.Msgs {
@@ -581,4 +590,71 @@ func chatPwTitle(ctx context.Context, set bool) string {
 		return T(ctx, "skychat.password.change")
 	}
 	return T(ctx, "skychat.password.set")
+}
+
+// ChatNotify is skychat's notification settings (/notify-settings).
+type ChatNotify struct {
+	Enabled bool     `json:"enabled"`
+	Muted   []string `json:"muted"`
+}
+
+// MutedKey is whether the conversation key is muted.
+func (n *ChatNotify) MutedKey(key string) bool {
+	if n == nil {
+		return false
+	}
+	for _, k := range n.Muted {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}
+
+// GroupReply is a quoted reply in a group message body, the
+// {"skychat_reply":...} envelope of cmd/apps/skychat/commands/reply.go.
+type GroupReply struct {
+	ToSender  string `json:"to_sender,omitempty"`
+	ToTS      string `json:"to_ts,omitempty"`
+	ToPreview string `json:"to_preview,omitempty"`
+	Text      string `json:"text"`
+}
+
+type groupReplyEnvelope struct {
+	Reply *GroupReply `json:"skychat_reply"`
+}
+
+// ParseGroupReply reads a reply envelope from a group message body.
+func ParseGroupReply(text string) (GroupReply, bool) {
+	t := strings.TrimSpace(text)
+	if t == "" || t[0] != '{' || !strings.Contains(t, "skychat_reply") {
+		return GroupReply{}, false
+	}
+	var env groupReplyEnvelope
+	if err := json.Unmarshal([]byte(t), &env); err != nil || env.Reply == nil {
+		return GroupReply{}, false
+	}
+	return *env.Reply, true
+}
+
+// GroupReplyBody is the body that sends text as a reply to the message
+// GroupMsgID names, quoting preview.
+func GroupReplyBody(text, msgID, preview string) (string, error) {
+	sender, ts, ok := strings.Cut(strings.TrimPrefix(msgID, "g|"), "|")
+	if !ok || !strings.HasPrefix(msgID, "g|") {
+		return "", errors.New("bad reply reference")
+	}
+	b, err := json.Marshal(groupReplyEnvelope{Reply: &GroupReply{ToSender: sender, ToTS: ts, ToPreview: chatClip(preview, 120), Text: text}})
+	return string(b), err
+}
+
+// GroupMsgID names a group message by its sender and RFC 3339 time, as the
+// reply envelope locates its parent.
+func GroupMsgID(sender, ts string) string { return "g|" + sender + "|" + ts }
+
+func groupText(s string) string {
+	if r, ok := ParseGroupReply(s); ok {
+		return r.Text
+	}
+	return s
 }
