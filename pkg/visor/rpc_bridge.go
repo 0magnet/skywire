@@ -10,7 +10,7 @@
 //
 //	6 bytes — magic ("SKYBRI"). cmux peeks this but doesn't
 //	          consume it, so we read all 42 bytes ourselves.
-//	1 byte  — scheme: 0 = dmsg, 1 = skynet
+//	1 byte  — scheme: 0 = dmsg, 1 = skynet, 2 = hypervisor (rpc_tunnel.go)
 //	33 bytes — target visor PK
 //	2 bytes — little-endian uint16. Dmsg port for scheme=0
 //	          (typically DmsgVisorRPCPort = 57). Ignored for
@@ -52,6 +52,9 @@ const bridgeMagic = "SKYBRI"
 const (
 	bridgeSchemeDmsg   byte = 0
 	bridgeSchemeSkynet byte = 1
+	// bridgeSchemeHypervisor reaches a visor attached to this hypervisor
+	// through the RPC conn the hypervisor already holds to it.
+	bridgeSchemeHypervisor byte = 2
 
 	// bridgeHeaderSize = 6 magic + 1 scheme + 33 PK + 2 port = 42.
 	bridgeHeaderSize = 42
@@ -153,6 +156,8 @@ func handleBridgeConn(ctx context.Context, log *logging.Logger, tcpConn net.Conn
 		stream, err = openDmsgStream(ctx, v.dmsgC, targetPK, targetPort)
 	case bridgeSchemeSkynet:
 		stream, err = openSkynetStream(v, targetPK)
+	case bridgeSchemeHypervisor:
+		stream, err = v.rpcTunnelDial(targetPK)
 	default:
 		log.WithField("scheme", scheme).Warn("rpc bridge: unsupported scheme")
 		return

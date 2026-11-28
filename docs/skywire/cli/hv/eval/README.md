@@ -46,7 +46,7 @@ skywire cli hv eval [webSocketDebuggerUrl] <js-expression>
       --json              print output as JSON
       --shape             print the output schema skeleton (zero values, all fields) instead of data
       --tui               browse commands and help interactively
-      --via dmsg://<pk>   remote visor target — dmsg://<pk> or `skynet://<pk>`
+      --via dmsg://<pk>   remote visor target — dmsg://<pk>, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)
 ```
 
 ---

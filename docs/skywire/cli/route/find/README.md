@@ -43,7 +43,7 @@ skywire cli route find <public-key> | <public-key-visor-1> <public-key-visor-2>
       --rpc string        RPC server address (env: SKYWIRE_RPC) (default "localhost:3435")
       --shape             print the output schema skeleton (zero values, all fields) instead of data
       --tui               browse commands and help interactively
-      --via dmsg://<pk>   remote visor target — dmsg://<pk> or `skynet://<pk>`
+      --via dmsg://<pk>   remote visor target — dmsg://<pk>, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)
 ```
 
 ---

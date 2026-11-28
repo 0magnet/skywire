@@ -61,6 +61,11 @@ This gives you the same structured, filtered, follow-able view you have
 locally, just routed through dmsg/skynet — the filtering happens on the
 remote side, so you don't pull the whole buffer just to grep it.
 
+`--via hv://<pk>` reaches a visor attached to the local visor's hypervisor
+(or to one of its sub-hypervisors) over the connection the hypervisor already
+holds to it. No whitelist entry is needed on the remote, and there is no new
+dmsg dial. Both the hypervisor and the target need a build with hv:// support.
+
 ---
 
 ## 2. Remote persistent log — `cli log file <pk>`

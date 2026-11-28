@@ -2313,6 +2313,46 @@ func registerVisorRPC(rpcSrv *rpc.Server, rpcName string, rpcRcvr *RPC) error {
 			return rpcReply, rpcRcvr.PublicAutoconnectStatus(rpcArg, rpcReply)
 		}, nil
 	})
+	rpcSrv.HandleCall(rpcName+".RPCTunnelClose", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
+		rpcArg := new(uint64)
+		if err := rpcDec.Decode(rpcArg); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			rpcReply := new(struct{})
+			return rpcReply, rpcRcvr.RPCTunnelClose(rpcArg, rpcReply)
+		}, nil
+	})
+	rpcSrv.HandleCall(rpcName+".RPCTunnelOpen", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
+		rpcArg := new(cipher.PubKey)
+		if err := rpcDec.Decode(rpcArg); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			rpcReply := new(uint64)
+			return rpcReply, rpcRcvr.RPCTunnelOpen(rpcArg, rpcReply)
+		}, nil
+	})
+	rpcSrv.HandleCall(rpcName+".RPCTunnelRead", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
+		rpcArg := new(visorapi.RPCTunnelReadArgs)
+		if err := rpcDec.Decode(rpcArg); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			rpcReply := new([]byte)
+			return rpcReply, rpcRcvr.RPCTunnelRead(rpcArg, rpcReply)
+		}, nil
+	})
+	rpcSrv.HandleCall(rpcName+".RPCTunnelWrite", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
+		rpcArg := new(visorapi.RPCTunnelWriteArgs)
+		if err := rpcDec.Decode(rpcArg); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			rpcReply := new(struct{})
+			return rpcReply, rpcRcvr.RPCTunnelWrite(rpcArg, rpcReply)
+		}, nil
+	})
 	rpcSrv.HandleCall(rpcName+".RecentAppLog", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
 		rpcArg := new(visorapi.RecentAppLogRequest)
 		if err := rpcDec.Decode(rpcArg); err != nil {

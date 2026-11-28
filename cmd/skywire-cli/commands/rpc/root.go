@@ -57,6 +57,10 @@ var (
 	//     existing --rpc port via cmux + magic-byte prefix).
 	//   - "skynet://<pk>" — local visor proxies via TransportRPCCall
 	//     (route ID 0 / VisorRPCPacket).
+	//   - "hv://<pk>" (or "hv:<pk>") — local visor, as hypervisor, tunnels
+	//     to <pk> over the RPC conn it already holds to that managed
+	//     visor, including through sub-hypervisors. No whitelist entry
+	//     for the caller is needed on <pk>.
 	Via string
 )
 
@@ -166,10 +170,13 @@ func viaClient(cmdFlags *pflag.FlagSet, via string, quiet bool) (visorapi.API, e
 	case strings.HasPrefix(via, "skynet://"):
 		rest = strings.TrimPrefix(via, "skynet://")
 		scheme = 1 // bridgeSchemeSkynet
+	case strings.HasPrefix(via, "hv:"):
+		rest = strings.TrimPrefix(strings.TrimPrefix(via, "hv:"), "//")
+		scheme = 2 // bridgeSchemeHypervisor
 	default:
 		if !quiet {
 			internal.PrintError(cmdFlags, fmt.Errorf(
-				"--via must be dmsg://<pk>[:<port>] or skynet://<pk>; got %q", via))
+				"--via must be dmsg://<pk>[:<port>], skynet://<pk> or hv://<pk>; got %q", via))
 		}
 		return nil, fmt.Errorf("unsupported --via scheme: %q", via)
 	}
@@ -259,10 +266,7 @@ func bridgeClient(cmdFlags *pflag.FlagSet, scheme byte, pkStr string, port uint1
 	}
 
 	rpcCallTimeout := time.Duration(Timeout) * time.Second
-	schemeName := "dmsg"
-	if scheme == 1 {
-		schemeName = "skynet"
-	}
+	schemeName := [...]string{"dmsg", "skynet", "hv"}[min(int(scheme), 2)]
 	rpcLogger := logging.MustGetLogger(fmt.Sprintf("%s://%s", schemeName, pkStr))
 	return visorapi.NewRPCClient(rpcLogger, conn, visorapi.RPCPrefix, rpcCallTimeout), nil
 }

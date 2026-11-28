@@ -30,7 +30,7 @@ skywire cli config update vpnc
       --timeout int       RPC timeout in seconds (0 = unlimited) (default 30)
       --tui               browse commands and help interactively
   -u, --user              update config at: $HOME/skywire-config.json
-      --via dmsg://<pk>   remote visor target — dmsg://<pk> or `skynet://<pk>`
+      --via dmsg://<pk>   remote visor target — dmsg://<pk>, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)
 ```
 
 ---

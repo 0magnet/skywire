@@ -23,7 +23,7 @@ skywire cli pty fs umount <mountpoint>
       --timeout int        RPC timeout in seconds (0 = unlimited) (default 30)
       --transport string   transport: auto|dmsg (via-visor) | tcp (direct, needs a <pk>@host:port target); skynet is not wired, --standalone forces standalone-dmsg (default "auto")
       --tui                browse commands and help interactively
-      --via dmsg://<pk>    remote visor target — dmsg://<pk> or `skynet://<pk>`
+      --via dmsg://<pk>    remote visor target — dmsg://<pk>, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)
       --visor-key          borrow the local visor's SK from /opt/skywire/skywire.json for the tcp noise handshake (default true; --sk wins) (default true)
 ```
 

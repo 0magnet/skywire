@@ -8,7 +8,7 @@ description: Core reference and index for the skywire CLI. Global flags and outp
 The CLI is `skywire cli ...` in the single `skywire` binary (build it with `go build .` at the repository root). The visor RPC defaults to `localhost:3435` and is set with `--rpc` or `SKYWIRE_RPC`. The full generated command reference is `skywire doc`, and `<cmd> --help` is always current. These skills only cover what the help does not explain.
 
 ## Global conventions
-- Most commands take `--via dmsg://<pk>` or `--via skynet://<pk>` to run against a remote visor.
+- Most commands take `--via dmsg://<pk>` or `--via skynet://<pk>` to run against a remote visor. `--via hv://<pk>` reaches a visor attached to the local hypervisor (or a sub-hypervisor) over the hypervisor's own connection, with no whitelist entry needed on the remote.
 - Output flags are `--json`, `--jq '<expr>'` (implies `--json`) and `--shape` (prints the field skeleton, so use it before writing a `--jq`).
 - Run a command group with no arguments to see its subcommands.
 - Parse `--json` output with `--jq`. Do not grep the text tables.

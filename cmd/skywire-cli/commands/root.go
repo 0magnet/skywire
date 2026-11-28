@@ -180,9 +180,11 @@ func init() {
 	//                         the bridged conn.
 	//   --via skynet://<pk> — local visor proxies via
 	//                         TransportRPCCall (route ID 0).
+	//   --via hv://<pk>     — local visor, as hypervisor, tunnels over
+	//                         the RPC conn it holds to managed visor <pk>.
 	// Blank by default — every command behaves exactly as before
 	// when --via isn't set.
-	RootCmd.PersistentFlags().StringVar(&clirpc.Via, "via", "", "remote visor target — `dmsg://<pk>` or `skynet://<pk>`")
+	RootCmd.PersistentFlags().StringVar(&clirpc.Via, "via", "", "remote visor target — `dmsg://<pk>`, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)")
 
 	// --all reveals hidden flags and subcommands
 	RootCmd.Flags().BoolVar(&cliShowAll, "all", false, "show all flags and subcommands (including hidden)")

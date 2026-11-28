@@ -43,7 +43,7 @@ skywire cli mdisc check
       --shape             print the output schema skeleton (zero values, all fields) instead of data
       --tui               browse commands and help interactively
       --url string        specify alternative DMSG discovery url (default "dmsg://022e607e0914d6e7ccda7587f95790c09e126bbd506cc476a1eda852325aadd1aa:80")
-      --via dmsg://<pk>   remote visor target — dmsg://<pk> or `skynet://<pk>`
+      --via dmsg://<pk>   remote visor target — dmsg://<pk>, `skynet://<pk>` or `hv://<pk>` (a visor attached to the local hypervisor)
 ```
 
 ---

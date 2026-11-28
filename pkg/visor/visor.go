@@ -519,6 +519,8 @@ type Visor struct {
 
 	// Hypervisor instance (nil if never initialized; may be enabled/disabled at runtime)
 	hvInstance *Hypervisor
+	// rpcTunnels holds the RPC tunnels this visor answers for, see rpc_tunnel.go.
+	rpcTunnels rpcTunnelTable
 	// alertSvc is the offline alerts (alerts.go), set by initAlerts.
 	alertsMu sync.RWMutex
 	alertSvc *alerts.Service
