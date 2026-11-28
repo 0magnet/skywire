@@ -1163,6 +1163,16 @@ func registerVisorRPC(rpcSrv *rpc.Server, rpcName string, rpcRcvr *RPC) error {
 			return rpcReply, rpcRcvr.GroupFileKey(rpcArg, rpcReply)
 		}, nil
 	})
+	rpcSrv.HandleCall(rpcName+".GroupForget", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
+		rpcArg := new(string)
+		if err := rpcDec.Decode(rpcArg); err != nil {
+			return nil, err
+		}
+		return func() (any, error) {
+			rpcReply := new(struct{})
+			return rpcReply, rpcRcvr.GroupForget(rpcArg, rpcReply)
+		}, nil
+	})
 	rpcSrv.HandleCall(rpcName+".GroupGet", func(rpcDec *gob.Decoder) (rpc.CallFunc, error) {
 		rpcArg := new(string)
 		if err := rpcDec.Decode(rpcArg); err != nil {

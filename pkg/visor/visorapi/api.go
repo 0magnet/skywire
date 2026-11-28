@@ -238,6 +238,7 @@ type Chat interface {
 	GroupWait(since time.Time, wait time.Duration) ([]GroupMessage, error)
 	GroupDelete(id string) error
 	GroupLeave(id string) error
+	GroupForget(id string) error
 	GroupHistory(groupID string, limit int) ([]GroupMessage, error)
 	GroupHistoryPage(args GroupHistoryPageArgs) ([]GroupMessage, error)
 	GroupHistoryGroups() ([]string, error)

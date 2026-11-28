@@ -2271,7 +2271,16 @@
       "notify-on": "开启通知",
       "notify-off": "关闭通知",
       "mute-chat": "将此聊天的通知静音",
-      "unmute-chat": "取消此聊天的通知静音"
+      "unmute-chat": "取消此聊天的通知静音",
+      "ended": "你已不在此群组中。",
+      "forget": "移除群组",
+      "forget-confirm": "移除此群组？其记录和已存储的消息将从此节点删除。",
+      "forget-help": "从此节点删除此群组及其已存储的消息",
+      "more": "更多",
+      "show-ended": "显示 {{ count }} 个已退出或已删除的群组",
+      "hide-ended": "隐藏已退出或已删除的群组",
+      "delete-chat": "删除聊天",
+      "delete-chat-confirm": "从此节点删除此聊天及其已存储的消息？"
     },
     "errors": {
       "visor-unavailable": "节点不可用。",

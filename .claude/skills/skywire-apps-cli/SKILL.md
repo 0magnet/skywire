@@ -78,7 +78,8 @@ Mutating: `create -n/--name (req) [-k/--kind public|private|channel] [-m/--mode 
 `add <id> <pk>`, `promote <id> <pk>`, `demote <id> <pk>`,
 `peer-backfill <id> on|off`, `rotate-key <id>`, `send <id> <text…>`,
 `unsend <id> <ts-unixnano>`, `leave <id>`, `delete <id>` (both drop the group's stored history; delete leaves a `revoked`
-tombstone in `group list`).
+tombstone in `group list`), `forget <id>` (drops a left or deleted group's record, CXO data and
+history so it stops listing; refused for an active group).
 
 ### skychat voice (all via visor RPC)
 

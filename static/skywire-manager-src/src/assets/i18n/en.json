@@ -2271,7 +2271,16 @@
       "notify-on": "Turn notifications on",
       "notify-off": "Turn notifications off",
       "mute-chat": "Mute notifications for this chat",
-      "unmute-chat": "Unmute notifications for this chat"
+      "unmute-chat": "Unmute notifications for this chat",
+      "ended": "You are no longer in this room.",
+      "forget": "Forget room",
+      "forget-confirm": "Forget this room? Its record and stored messages are removed from this visor.",
+      "forget-help": "Remove this room and its stored messages from this visor",
+      "more": "More",
+      "show-ended": "Show {{ count }} left or deleted rooms",
+      "hide-ended": "Hide left or deleted rooms",
+      "delete-chat": "Delete chat",
+      "delete-chat-confirm": "Delete this chat and its stored messages from this visor?"
     },
     "errors": {
       "visor-unavailable": "Visor unavailable.",

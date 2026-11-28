@@ -96,7 +96,7 @@ func init() {
 		groupJoinCmd, groupAskAgainCmd, groupAddCmd, groupPromoteCmd, groupDemoteCmd, groupRotateKeyCmd,
 		groupPeerBackfillCmd,
 		groupSendCmd, groupUnsendCmd, groupListenCmd, groupHistoryCmd,
-		groupLeaveCmd, groupDeleteCmd,
+		groupLeaveCmd, groupDeleteCmd, groupForgetCmd,
 	)
 	RootCmd.AddCommand(groupCmd)
 }
@@ -1087,6 +1087,26 @@ var groupDeleteCmd = &cobra.Command{
 			internal.PrintFatalError(cmd.Flags(), err)
 		}
 		internal.PrintOutput(cmd.Flags(), nil, fmt.Sprintf("deleted %s\n", args[0]))
+	},
+}
+
+var groupForgetCmd = &cobra.Command{
+	Use:   "forget <group-id>",
+	Short: "Drop a left or deleted group: its record, data and history",
+	Long: `Drop a group this visor left or deleted, or was refused or removed from:
+its record, its CXO data and its stored history. It no longer lists and does
+not come back after a restart. An active group is refused; leave or delete it
+first.`,
+	Args: cobra.ExactArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		rpcClient, err := clirpc.Client(cmd.Flags())
+		if err != nil {
+			internal.PrintFatalError(cmd.Flags(), err)
+		}
+		if err := rpcClient.GroupForget(args[0]); err != nil {
+			internal.PrintFatalError(cmd.Flags(), err)
+		}
+		internal.PrintOutput(cmd.Flags(), nil, fmt.Sprintf("forgot %s\n", args[0]))
 	},
 }
 

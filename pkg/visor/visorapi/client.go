@@ -2014,6 +2014,11 @@ func (rc *rpcClient) GroupDelete(id string) error {
 	return rc.Call("GroupDelete", &id, &struct{}{})
 }
 
+// GroupForget implements API.
+func (rc *rpcClient) GroupForget(id string) error {
+	return rc.Call("GroupForget", &id, &struct{}{})
+}
+
 // GroupLeave implements API.
 func (rc *rpcClient) GroupLeave(id string) error {
 	return rc.Call("GroupLeave", &id, &struct{}{})

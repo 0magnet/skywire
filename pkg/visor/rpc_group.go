@@ -431,6 +431,15 @@ func (r *RPC) GroupDelete(id *string, _ *struct{}) (err error) {
 	return r.visor.GroupDelete(*id)
 }
 
+// GroupForget drops a left or deleted group from this visor.
+func (r *RPC) GroupForget(id *string, _ *struct{}) (err error) {
+	defer rpcutil.LogCall(r.log, "GroupForget", id)(nil, &err)
+	if id == nil {
+		return fmt.Errorf("nil request")
+	}
+	return r.visor.GroupForget(*id)
+}
+
 // GroupLeave is the member-side counterpart of GroupDelete.
 func (r *RPC) GroupLeave(id *string, _ *struct{}) (err error) {
 	defer rpcutil.LogCall(r.log, "GroupLeave", id)(nil, &err)
