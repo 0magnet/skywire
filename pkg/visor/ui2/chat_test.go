@@ -199,3 +199,20 @@ func TestChatPrivacyAndSearch(t *testing.T) {
 	require.Contains(t, hits, "1 messages found")
 	require.Contains(t, hits, "peer="+peer.Hex())
 }
+
+func TestChatSenderAndRole(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	peer, _ := cipher.GenerateKeyPair()
+	g := visorapi.GroupInfo{ID: "g1", Name: "room", Role: "member", Status: "active", Admins: []cipher.PubKey{pk}, Members: []cipher.PubKey{pk, peer}}
+	c := Chat{PK: pk.Hex(), Mode: "groups", Groups: []visorapi.GroupInfo{g}, Voice: Voice{Off: true}}
+	c.Group = &c.Groups[0]
+	c.GMsgs = []visorapi.GroupMessage{{GroupID: "g1", SenderPK: peer, Text: "hi", TS: time.Now()}}
+	c.AllGMsgs = c.GMsgs
+	require.Equal(t, "admin", c.MyRole())
+	out := renderEN(t, ChatPage(c))
+	require.Contains(t, out, "· admin<")
+	require.Contains(t, out, ">"+peer.Hex()[:8]+"…"+peer.Hex()[62:]+"<")
+	require.Contains(t, out, `title="`+peer.Hex()+`"`)
+	c.Names = map[string]string{peer.Hex(): "Bob"}
+	require.Contains(t, renderEN(t, ChatRoomLog(c)), ">Bob<")
+}

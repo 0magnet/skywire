@@ -852,3 +852,28 @@ func b01Approval(on bool) string {
 	}
 	return "approval-on"
 }
+
+// chatShortKey is the first 8 and last 4 characters of a key.
+func chatShortKey(pk string) string {
+	if len(pk) <= 12 {
+		return pk
+	}
+	return pk[:8] + "…" + pk[len(pk)-4:]
+}
+
+// MyRole is this visor's role in the open room: owner, admin from the
+// room's admin list, or member.
+func (c Chat) MyRole() string {
+	if c.Group == nil {
+		return ""
+	}
+	if c.Owner() {
+		return "owner"
+	}
+	for _, a := range c.Group.Admins {
+		if a.Hex() == c.PK {
+			return "admin"
+		}
+	}
+	return string(c.Group.Role)
+}
