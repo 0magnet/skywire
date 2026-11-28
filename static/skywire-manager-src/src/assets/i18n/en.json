@@ -2266,7 +2266,12 @@
       "admin": "admin",
       "offered": "offered",
       "parked": "parked",
-      "held": "held"
+      "held": "held",
+      "notify-muted": "Notifications muted",
+      "notify-on": "Turn notifications on",
+      "notify-off": "Turn notifications off",
+      "mute-chat": "Mute notifications for this chat",
+      "unmute-chat": "Unmute notifications for this chat"
     },
     "errors": {
       "visor-unavailable": "Visor unavailable.",

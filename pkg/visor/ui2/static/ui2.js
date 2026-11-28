@@ -553,6 +553,8 @@ document.addEventListener('DOMContentLoaded', function () {
 			f.querySelector('[data-reply-input]').value = r.getAttribute('data-reply');
 			f.querySelector('[data-reply-text]').textContent = (r.getAttribute('data-reply-quote') || '').slice(0, 120);
 			f.querySelector('[data-reply-show]').hidden = false;
+			var rp = f.querySelector('[data-reply-preview]');
+			if (rp) rp.value = r.getAttribute('data-reply-quote') || '';
 			var ta = f.querySelector('textarea');
 			if (ta) ta.focus();
 			return;

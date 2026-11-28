@@ -19,6 +19,7 @@ templ ChatPage(c Chat) {
 						</nav>
 						<span class="spacer"></span>
 						<span class="tg-conn" data-chat-conn hidden data-on={ T(ctx, "skychat.connected") } data-off={ T(ctx, "skychat.disconnected") }></span>
+						@ChatNotifyAll(c)
 						@ChatPassword(c)
 					</div>
 					<div class="tg-side-tools">
@@ -59,6 +60,7 @@ templ chatDirectMain(c Chat) {
 					@chatName(c.NameOf(c.Peer), c.Peer, "tg-title")
 					<div class="tg-sub mono" data-copy={ c.Peer } title={ T(ctx, "nodes.copy-key") }>{ c.Peer }</div>
 				</div>
+				@ChatMute(c, c.Peer)
 				if !c.Voice.Off {
 					<button class="icon-btn" type="button" hx-post={ c.Voice.url("/call") } hx-vals={ jsonVals(c.Voice.vals(nil)) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.call-tip") } aria-label={ T(ctx, "skychat.voice.call") }><span class="mi">call</span></button>
 				}
@@ -81,11 +83,7 @@ templ chatDirectMain(c Chat) {
 				<input type="hidden" name="new" value="1"/>
 			}
 			<input type="hidden" name="reply_to" value="" data-reply-input/>
-			<div class="tg-reply" data-reply-show hidden>
-				<span class="mi">reply</span>
-				<span class="tg-reply-text" data-reply-text></span>
-				<button class="icon-btn" type="button" data-reply-cancel aria-label={ T(ctx, "skychat.cancel-reply") }><span class="mi">close</span></button>
-			</div>
+			@chatReplyBar()
 			<div class="tg-compose-row">
 				<select name="network" class="tg-net" title={ T(ctx, "skychat.network") } aria-label={ T(ctx, "skychat.network") }>
 					<option value="auto">{ T(ctx, "ui2.chat.network-auto") }</option>
@@ -145,6 +143,9 @@ templ chatRow(c Chat, r ChatRow) {
 					<span class="mi tg-lock">lock</span>
 				}
 				@chatName(r.Name, r.ID, "tg-name")
+				if c.Notify.MutedKey(r.ID) {
+					<span class="mi tg-lock" title={ T(ctx, "ui2.chat.notify-muted") }>volume_off</span>
+				}
 				<span class="tg-time">{ chatListTime(r.Time, time.Now()) }</span>
 			</div>
 			<div class="tg-row-bottom">
@@ -227,7 +228,7 @@ templ chatBubble(c Chat, l ChatLine) {
 		if l.ID != "" && !l.Deleted {
 			<div class="tg-acts">
 				<button class="icon-btn" type="button" data-reply={ l.ID } data-reply-quote={ l.Text } title={ T(ctx, "ui2.chat.reply") } aria-label={ T(ctx, "ui2.chat.reply") }><span class="mi">reply</span></button>
-				if l.Out {
+				if l.Out && c.Mode != "groups" {
 					<button class="icon-btn" type="button" hx-post={ c.url("/delete") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer, "id": l.ID}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-confirm") } title={ T(ctx, "ui2.chat.delete") } aria-label={ T(ctx, "ui2.chat.delete") }><span class="mi">delete</span></button>
 				}
 			</div>
@@ -323,6 +324,7 @@ templ chatRoomMain(c Chat) {
 					<span class="tg-title">{ c.Group.Name }</span>
 					<span class="tg-sub">{ chatGroupTerm(ctx, string(c.Group.Mode)) } · { itoa(len(c.Group.Members)) } { T(ctx, "skychat.members") } · { chatGroupTerm(ctx, string(c.Group.Role)) }</span>
 				</button>
+				@ChatMute(c, c.Group.ID)
 				<button class="icon-btn" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "skychat.invite") } aria-label={ T(ctx, "skychat.invite") }><span class="mi">link</span></button>
 				<button class="icon-btn" type="button" hx-get={ c.url("/groups/info?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.info") } aria-label={ T(ctx, "ui2.chat.info") }><span class="mi">info</span></button>
 			</header>
@@ -346,6 +348,9 @@ templ chatRoomMain(c Chat) {
 					} else {
 						<form id="chat-form" class="tg-compose" hx-post={ c.url("/groups/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
 							<input type="hidden" name="group" value={ c.Group.ID }/>
+							<input type="hidden" name="reply_to" value="" data-reply-input/>
+							<input type="hidden" name="reply_preview" value="" data-reply-preview/>
+							@chatReplyBar()
 							<div class="tg-compose-row">
 								<textarea name="text" rows="1" required placeholder={ T(ctx, "ui2.chat.placeholder") } aria-label={ T(ctx, "skychat.message") } data-enter-send></textarea>
 								<button class="tg-send" type="submit" title={ T(ctx, "skychat.send") } aria-label={ T(ctx, "skychat.send") }><span class="mi">send</span></button>
@@ -492,4 +497,34 @@ templ ChatPassword(c Chat) {
 			</form>
 		</div>
 	</details>
+}
+
+templ chatReplyBar() {
+	<div class="tg-reply" data-reply-show hidden>
+		<span class="mi">reply</span>
+		<span class="tg-reply-text" data-reply-text></span>
+		<button class="icon-btn" type="button" data-reply-cancel aria-label={ T(ctx, "skychat.cancel-reply") }><span class="mi">close</span></button>
+	</div>
+}
+
+// ChatNotifyAll turns skychat's notifications on or off for every chat.
+templ ChatNotifyAll(c Chat) {
+	if c.Notify != nil {
+		if c.Notify.Enabled {
+			<button id="chat-notify" class="icon-btn" type="button" hx-post={ c.url("/notify") } hx-vals={ jsonVals(map[string]string{"enabled": "0", "mode": chatMode(c)}) } hx-target="#chat-notify" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.notify-off") } aria-label={ T(ctx, "ui2.chat.notify-off") }><span class="mi">notifications</span></button>
+		} else {
+			<button id="chat-notify" class="icon-btn tg-off" type="button" hx-post={ c.url("/notify") } hx-vals={ jsonVals(map[string]string{"enabled": "1", "mode": chatMode(c)}) } hx-target="#chat-notify" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.notify-on") } aria-label={ T(ctx, "ui2.chat.notify-on") }><span class="mi">notifications_off</span></button>
+		}
+	}
+}
+
+// ChatMute mutes or unmutes the notifications of one conversation.
+templ ChatMute(c Chat, key string) {
+	if c.Notify != nil {
+		if c.Notify.MutedKey(key) {
+			<button id="chat-mute" class="icon-btn tg-off" type="button" hx-post={ c.url("/notify") } hx-vals={ jsonVals(map[string]string{"key": key, "muted": "0", "mode": chatMode(c)}) } hx-target="#chat-mute" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.unmute-chat") } aria-label={ T(ctx, "ui2.chat.unmute-chat") }><span class="mi">volume_off</span></button>
+		} else {
+			<button id="chat-mute" class="icon-btn" type="button" hx-post={ c.url("/notify") } hx-vals={ jsonVals(map[string]string{"key": key, "muted": "1", "mode": chatMode(c)}) } hx-target="#chat-mute" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.mute-chat") } aria-label={ T(ctx, "ui2.chat.mute-chat") }><span class="mi">volume_up</span></button>
+		}
+	}
 }

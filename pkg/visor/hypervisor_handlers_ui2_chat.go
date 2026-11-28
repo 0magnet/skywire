@@ -41,6 +41,7 @@ func (hv *Hypervisor) ui2ChatRoutes(r *httputil.Router) {
 	r.Post("/visors/{pk}/chat/groups/leave", hv.ui2Chat("gleave"))
 	r.Post("/visors/{pk}/chat/groups/delete", hv.ui2Chat("gdelete"))
 	r.Post("/visors/{pk}/chat/password", hv.ui2Chat("password"))
+	r.Post("/visors/{pk}/chat/notify", hv.ui2Chat("notify"))
 	hv.ui2VoiceRoutes(r)
 }
 
@@ -211,6 +212,7 @@ func (hv *Hypervisor) ui2ChatDM(api visorapi.API, c ui2.Chat) ui2.Chat {
 	}
 	c = ui2.ChatOf(c, ms)
 	c.Names = hv.ui2ChatNames(api, c.Peers)
+	c.Notify = hv.ui2ChatNotify()
 	return c
 }
 
@@ -233,6 +235,7 @@ func (hv *Hypervisor) ui2ChatRead(c ui2.Chat) {
 
 // ui2ChatRooms fills the room view for the selected room.
 func (hv *Hypervisor) ui2ChatRooms(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
+	c.Notify = hv.ui2ChatNotify()
 	gs, err := api.GroupList()
 	if err != nil {
 		c.Err = err.Error()
@@ -353,13 +356,21 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 			hv.render(w, r, ui2.ChatRoomLog(c), ui2.ChatRooms(c, true))
 		case "gsend":
 			c.Mode = "groups"
-			err := ctx.API.GroupSend(visorapi.GroupSendArgs{ID: group, Text: r.FormValue("text")})
+			text, err := r.FormValue("text"), error(nil)
+			if rt := r.FormValue("reply_to"); rt != "" {
+				text, err = ui2.GroupReplyBody(text, rt, r.FormValue("reply_preview"))
+			}
+			if err == nil {
+				err = ctx.API.GroupSend(visorapi.GroupSendArgs{ID: group, Text: text})
+			}
 			c = hv.ui2ChatRooms(ctx.API, c, group)
 			if err != nil {
 				hv.render(w, r, ui2.ChatRoomLog(c), ui2.Toast(err.Error(), true))
 				return
 			}
 			hv.render(w, r, ui2.ChatRoomLog(c), ui2.ChatRooms(c, true))
+		case "notify":
+			hv.ui2ChatNotifySet(w, r, c)
 		case "password":
 			hv.render(w, r, ui2.ChatPassword(hv.ui2ChatPassword(r, ctx, c)))
 		case "gcreate", "gjoin", "gask", "gleave", "gdelete":
@@ -474,4 +485,39 @@ func (hv *Hypervisor) ui2ChatPassword(r *http.Request, ctx *httpCtx, c ui2.Chat)
 	}
 	c.PwSet, _ = ctx.API.SkychatPasswordIsSet() //nolint:errcheck
 	return c
+}
+
+// ui2ChatNotify reads skychat's notification settings, nil on a skychat
+// that has none.
+func (hv *Hypervisor) ui2ChatNotify() *ui2.ChatNotify {
+	b, _, err := hv.ui2SkychatCall(http.MethodGet, "notify-settings", "", nil)
+	if err != nil {
+		return nil
+	}
+	var n ui2.ChatNotify
+	if json.Unmarshal(b, &n) != nil {
+		return nil
+	}
+	return &n
+}
+
+// ui2ChatNotifySet turns notifications on or off, or mutes one chat, and
+// answers with the button that changed.
+func (hv *Hypervisor) ui2ChatNotifySet(w http.ResponseWriter, r *http.Request, c ui2.Chat) {
+	key := r.FormValue("key")
+	body := map[string]any{"key": key, "muted": r.FormValue("muted") == "1"}
+	if key == "" {
+		body = map[string]any{"enabled": r.FormValue("enabled") == "1"}
+	}
+	_, _, err := hv.ui2SkychatCall(http.MethodPost, "notify-settings", "", body)
+	c.Notify = hv.ui2ChatNotify()
+	out := ui2.ChatNotifyAll(c)
+	if key != "" {
+		out = ui2.ChatMute(c, key)
+	}
+	if err != nil {
+		hv.render(w, r, out, ui2.Toast(err.Error(), true))
+		return
+	}
+	hv.render(w, r, out)
 }

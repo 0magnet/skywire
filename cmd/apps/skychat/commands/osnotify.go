@@ -205,6 +205,12 @@ func notifyOSInboundThread(threadKey, tag, title, body string) {
 		}
 		return
 	}
+	if !muteStore.Allows(threadKey) {
+		if chatLog != nil {
+			chatLog.WithField("thread", threadKey).Debug("skychat: notification suppressed — muted")
+		}
+		return
+	}
 	if uiShowingThread(threadKey) {
 		if chatLog != nil {
 			chatLog.WithField("thread", threadKey).
