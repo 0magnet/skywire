@@ -1,231 +1,495 @@
 package ui2
 
-import "github.com/skycoin/skywire/pkg/visor/visorapi"
+import "time"
 
-// ChatPage is the chat tab: direct messages or the group rooms.
+// ChatPage is the chat tab, laid out after Telegram Web: the chat list on
+// the left and the open thread on the right, one at a time on a phone.
 templ ChatPage(c Chat) {
 	@VisorLayout(c.PK, "chat") {
-		<div class="head">
-			<h1>{ T(ctx, "skychat.title") }</h1>
-			<span class="spacer"></span>
-			if !c.Remote {
-				<a class={ "btn sm", templ.KV("primary", c.Mode != "groups") } href={ templ.URL(c.url("?mode=dm")) }>{ T(ctx, "skychat.mode-direct") }</a>
-				<a class={ "btn sm", templ.KV("primary", c.Mode == "groups") } href={ templ.URL(c.url("?mode=groups")) }>{ T(ctx, "skychat.mode-groups") }</a>
-			}
-		</div>
 		if c.Remote {
+			<h1>{ T(ctx, "skychat.title") }</h1>
 			<p class="dim">{ T(ctx, "skychat.remote-unavailable") }</p>
-		} else if c.Mode == "groups" {
-			<div class="chat" data-labels>
-				@ChatRooms(c, false)
-				<section class="chat-main">
-					@ChatVoice(c.Voice)
-					@ChatRoomLog(c)
-					if c.Group != nil {
-						<form id="chat-form" class="chat-compose" hx-post={ c.url("/groups/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
-							<input type="hidden" name="group" value={ c.Group.ID }/>
-							<textarea name="text" rows="2" required placeholder={ T(ctx, "skychat.group-placeholder") } aria-label={ T(ctx, "skychat.message") } data-ctrl-enter></textarea>
-							<button class="btn primary" type="submit">{ T(ctx, "skychat.send") }</button>
-						</form>
-						@chatRoomTools(c)
-					}
-				</section>
-			</div>
 		} else {
-			@ChatPassword(c)
-			<div class="chat" data-labels>
-				@ChatPeers(c, false)
-				<section class="chat-main">
-					@ChatVoice(c.Voice)
-					@ChatLog(c)
-					<form id="chat-form" class="chat-compose" hx-post={ c.url("/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
-						if c.Peer != "" {
-							<input type="hidden" name="to" value={ c.Peer }/>
+			<div class={ "tg", templ.KV("thread-open", c.ThreadOpen()) } data-labels data-chat data-chat-pk={ c.PK } data-chat-mode={ chatMode(c) } data-chat-open={ chatOpenID(c) }>
+				<aside class="tg-side">
+					<div class="tg-side-head">
+						<nav class="tg-seg">
+							<a class={ templ.KV("on", c.Mode != "groups") } href={ templ.URL(c.url("?mode=dm")) }><span class="mi">person</span>{ T(ctx, "skychat.mode-direct") }</a>
+							<a class={ templ.KV("on", c.Mode == "groups") } href={ templ.URL(c.url("?mode=groups")) }><span class="mi">groups</span>{ T(ctx, "skychat.mode-groups") }</a>
+						</nav>
+						<span class="spacer"></span>
+						<span class="tg-conn" data-chat-conn hidden data-on={ T(ctx, "skychat.connected") } data-off={ T(ctx, "skychat.disconnected") }></span>
+						@ChatPassword(c)
+					</div>
+					<div class="tg-side-tools">
+						<label class="tg-search">
+							<span class="mi">search</span>
+							<input type="search" data-chat-search placeholder={ T(ctx, "ui2.chat.search") } aria-label={ T(ctx, "ui2.chat.search") } autocomplete="off"/>
+						</label>
+						if c.Mode == "groups" {
+							@chatRoomForms(c)
 						} else {
-							<input class="mono" name="to" required placeholder={ T(ctx, "skychat.to") } aria-label={ T(ctx, "skychat.to") } autocomplete="off"/>
+							<a class="icon-btn" href={ templ.URL(c.url("?mode=dm&new=1")) } title={ T(ctx, "ui2.chat.new-message") } aria-label={ T(ctx, "ui2.chat.new-message") }><span class="mi">edit</span></a>
 						}
-						<input type="hidden" name="reply_to" value="" data-reply-input/>
-						<div class="small dim chat-quote" data-reply-show hidden>
-							<span data-reply-text></span>
-							<button class="icon-btn sm" type="button" data-reply-cancel aria-label={ T(ctx, "common.cancel") }><span class="mi">close</span></button>
-						</div>
-						<textarea name="message" rows="2" required placeholder={ T(ctx, "skychat.placeholder") } aria-label={ T(ctx, "skychat.message") } data-ctrl-enter></textarea>
-						<button class="btn primary" type="submit">{ T(ctx, "skychat.send") }</button>
-					</form>
-				</section>
+					</div>
+					if c.Mode == "groups" {
+						@ChatRooms(c, false)
+					} else {
+						@ChatPeers(c, false)
+					}
+				</aside>
+				if c.Mode == "groups" {
+					@chatRoomMain(c)
+				} else {
+					@chatDirectMain(c)
+				}
 			</div>
 		}
+	}
+}
+
+// chatDirectMain is the open direct conversation, or the new message view.
+templ chatDirectMain(c Chat) {
+	<section class={ "tg-main", templ.KV("peer", c.Peer != "") }>
+		<header class="tg-head">
+			<a class="icon-btn tg-back" href={ templ.URL(c.url("?mode=dm")) } aria-label={ T(ctx, "ui2.chat.back") }><span class="mi">arrow_back</span></a>
+			if c.Peer != "" {
+				@chatAvatar(c.Peer, c.NameOf(c.Peer), c.avatarURL(c.Peer), "sm")
+				<div class="tg-head-text">
+					@chatName(c.NameOf(c.Peer), c.Peer, "tg-title")
+					<div class="tg-sub mono" data-copy={ c.Peer } title={ T(ctx, "nodes.copy-key") }>{ c.Peer }</div>
+				</div>
+				if !c.Voice.Off {
+					<button class="icon-btn" type="button" hx-post={ c.Voice.url("/call") } hx-vals={ jsonVals(c.Voice.vals(nil)) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.call-tip") } aria-label={ T(ctx, "skychat.voice.call") }><span class="mi">call</span></button>
+				}
+			} else {
+				<div class="tg-head-text">
+					<div class="tg-title">{ T(ctx, "ui2.chat.new-message") }</div>
+					<input class="mono tg-to" form="chat-form" name="to" required placeholder={ T(ctx, "skychat.to") } aria-label={ T(ctx, "skychat.to") } autocomplete="off"/>
+				</div>
+			}
+		</header>
+		@ChatVoice(c.Voice)
+		<div class="tg-thread">
+			@ChatLog(c)
+			@chatDown()
+		</div>
+		<form id="chat-form" class="tg-compose" hx-post={ c.url("/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
+			if c.Peer != "" {
+				<input type="hidden" name="to" value={ c.Peer }/>
+			} else {
+				<input type="hidden" name="new" value="1"/>
+			}
+			<input type="hidden" name="reply_to" value="" data-reply-input/>
+			<div class="tg-reply" data-reply-show hidden>
+				<span class="mi">reply</span>
+				<span class="tg-reply-text" data-reply-text></span>
+				<button class="icon-btn" type="button" data-reply-cancel aria-label={ T(ctx, "skychat.cancel-reply") }><span class="mi">close</span></button>
+			</div>
+			<div class="tg-compose-row">
+				<select name="network" class="tg-net" title={ T(ctx, "skychat.network") } aria-label={ T(ctx, "skychat.network") }>
+					<option value="auto">{ T(ctx, "ui2.chat.network-auto") }</option>
+					<option value="skynet">skynet</option>
+					<option value="dmsg">dmsg</option>
+				</select>
+				<textarea name="message" rows="1" required placeholder={ T(ctx, "ui2.chat.placeholder") } aria-label={ T(ctx, "skychat.message") } data-enter-send></textarea>
+				<button class="tg-send" type="submit" title={ T(ctx, "skychat.send") } aria-label={ T(ctx, "skychat.send") }><span class="mi">send</span></button>
+			</div>
+		</form>
+	</section>
+}
+
+templ chatDown() {
+	<button class="tg-down" type="button" data-chat-down hidden title={ T(ctx, "ui2.chat.scroll-bottom") } aria-label={ T(ctx, "ui2.chat.scroll-bottom") }><span class="mi">keyboard_arrow_down</span></button>
+}
+
+// chatAvatar is the round picture of a chat: its image when there is one,
+// over its initials on a color picked from its id.
+templ chatAvatar(id, name, img, size string) {
+	<span class={ "tg-av", chatHue(id), size } aria-hidden="true">
+		{ chatInitials(name, id) }
+		if img != "" {
+			<img src={ img } alt="" loading="lazy"/>
+		}
+	</span>
+}
+
+// chatName is a name, or a key the page's labels may replace.
+templ chatName(name, pk, class string) {
+	if name != "" {
+		<div class={ class }>{ name }</div>
+	} else {
+		<div class={ class, "mono" } data-label-for={ pk }>{ pk }</div>
 	}
 }
 
 // ChatPeers is the conversation list.
 templ ChatPeers(c Chat, oob bool) {
-	<aside id="chat-peers" class="chat-side" { oobAttrs(oob)... }>
-		<h2 class="small">{ T(ctx, "skychat.peers") }</h2>
-		<a class={ "chat-peer", templ.KV("active", c.Peer == "") } href={ templ.URL(c.url("?mode=dm")) }><span class="mi">edit</span> { T(ctx, "skychat.to") }</a>
-		if len(c.Peers) == 0 {
-			<p class="small dim">{ T(ctx, "skychat.peers-empty") }</p>
+	<nav id="chat-list" class="tg-list" { oobAttrs(oob)... }>
+		if rows := c.PeerRows(); len(rows) == 0 {
+			<p class="tg-note">{ T(ctx, "skychat.peers-empty") }</p>
+		} else {
+			for _, r := range rows {
+				@chatRow(c, r)
+			}
 		}
-		for _, p := range c.Peers {
-			<a class={ "chat-peer mono small", templ.KV("active", p == c.Peer) } href={ templ.URL(c.url("?mode=dm&peer=" + p)) } title={ p } data-label-for={ p }>{ p }</a>
-		}
-	</aside>
+	</nav>
+}
+
+templ chatRow(c Chat, r ChatRow) {
+	<a class={ "tg-row", templ.KV("active", r.Active) } href={ templ.URL(r.Href) } data-conv={ r.ID } data-in={ r.inboundAttr() } data-search={ r.searchAttr() }>
+		@chatAvatar(r.ID, r.Name, r.Avatar, "")
+		<div class="tg-row-main">
+			<div class="tg-row-top">
+				if r.Group != nil && r.Group.Mode == "private" {
+					<span class="mi tg-lock">lock</span>
+				}
+				@chatName(r.Name, r.ID, "tg-name")
+				<span class="tg-time">{ chatListTime(r.Time, time.Now()) }</span>
+			</div>
+			<div class="tg-row-bottom">
+				switch r.Disabled {
+					case "awaiting_approval":
+						<span class="tg-preview" title={ T(ctx, "ui2.chat.pending-help") }>{ T(ctx, "ui2.chat.pending") }</span>
+					case "denied":
+						<span class="tg-preview error" title={ T(ctx, "ui2.chat.declined-help") }>{ T(ctx, "ui2.chat.declined") }</span>
+					default:
+						if r.Preview != "" {
+							<span class="tg-preview">
+								if r.Mine {
+									<span class="tg-you">{ T(ctx, "skychat.you") }: </span>
+								}
+								{ r.Preview }
+							</span>
+						} else if r.Group != nil {
+							<span class="tg-preview">{ chatGroupTerm(ctx, string(r.Group.Mode)) } · { itoa(len(r.Group.Members)) } { T(ctx, "skychat.members") }</span>
+						} else {
+							<span class="tg-preview"></span>
+						}
+				}
+				<span class="tg-badge" data-badge hidden></span>
+			</div>
+		</div>
+	</a>
 }
 
 // ChatLog is the conversation with c.Peer. It polls itself and the peer list.
 templ ChatLog(c Chat) {
-	<div id="chat-log" class="chat-log" hx-get={ c.url("/log?peer=" + c.Peer) } hx-trigger="every 3s [document.visibilityState === 'visible']" hx-swap="outerHTML" data-follow>
-		@ErrorBox(c.Err)
-		if !c.History && c.Err == "" {
-			<p class="small dim">{ T(ctx, "skychat.no-history") }</p>
+	<div id="chat-log" class="tg-log" hx-get={ c.url("/log?peer=" + c.Peer) } hx-trigger="every 3s [document.visibilityState === 'visible'], chat:new from:body" hx-swap="outerHTML" data-chat-log>
+		<div class="tg-log-inner">
+			@ErrorBox(c.Err)
+			if !c.History && c.Err == "" {
+				<p class="tg-note">{ T(ctx, "skychat.no-history") }</p>
+			}
+			if c.Peer == "" {
+				<p class="tg-note">{ T(ctx, "ui2.chat.pick") }</p>
+			} else if len(c.Msgs) == 0 {
+				<p class="tg-note">{ T(ctx, "skychat.empty") }</p>
+			}
+			for _, l := range c.Lines(ctx, time.Now()) {
+				@chatBubble(c, l)
+			}
+		</div>
+	</div>
+}
+
+templ chatBubble(c Chat, l ChatLine) {
+	if l.Day != "" {
+		<div class="tg-day"><span>{ l.Day }</span></div>
+	}
+	<div class={ "tg-msg", templ.KV("out", l.Out), templ.KV("first", l.First), templ.KV("last", l.Last) } data-msg={ l.ID }>
+		if c.Mode == "groups" && !l.Out {
+			if l.Last {
+				@chatAvatar(l.From, c.NameOf(l.From), c.avatarURL(l.From), "xs")
+			} else {
+				<span class="tg-av-gap"></span>
+			}
 		}
-		if c.Peer != "" && len(c.Msgs) == 0 {
-			<p class="dim">{ T(ctx, "skychat.empty") }</p>
-		}
-		for _, m := range c.Msgs {
-			<div class={ "chat-msg", templ.KV("out", m.Outgoing) } data-msg={ m.ID }>
-				if m.ReplyTo != "" {
-					<div class="small dim chat-quote">↩ { c.QuoteOf(m.ReplyTo) }</div>
+		<div class="tg-bubble">
+			if c.Mode == "groups" && !l.Out && l.First {
+				@chatName(c.NameOf(l.From), l.From, "tg-from "+chatHue(l.From))
+			}
+			if l.Forwarded {
+				<div class="tg-fwd"><span class="mi">forward</span>{ T(ctx, "ui2.chat.forwarded") }</div>
+			}
+			if l.Quote != "" {
+				<a class="tg-quote" href={ templ.SafeURL("#m-" + l.ReplyTo) } data-quote-of={ l.ReplyTo }>{ l.Quote }</a>
+			}
+			if l.Deleted {
+				<div class="tg-text tg-deleted"><span class="mi">block</span>{ T(ctx, "skychat.message-deleted") }@chatMeta(c, l)</div>
+			} else {
+				if l.File.Name != "" {
+					@chatFile(l.File)
 				}
-				if m.Deleted {
-					<div class="dim small">—</div>
-				} else {
-					<div class="chat-text">{ m.Body() }</div>
+				<div class="tg-text">{ l.Text }@chatMeta(c, l)</div>
+			}
+		</div>
+		if l.ID != "" && !l.Deleted {
+			<div class="tg-acts">
+				<button class="icon-btn" type="button" data-reply={ l.ID } data-reply-quote={ l.Text } title={ T(ctx, "ui2.chat.reply") } aria-label={ T(ctx, "ui2.chat.reply") }><span class="mi">reply</span></button>
+				if l.Out {
+					<button class="icon-btn" type="button" hx-post={ c.url("/delete") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer, "id": l.ID}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-confirm") } title={ T(ctx, "ui2.chat.delete") } aria-label={ T(ctx, "ui2.chat.delete") }><span class="mi">delete</span></button>
 				}
-				<div class="small dim chat-meta">
-					{ chatTime(m.TS) }
-					if m.ID != "" && !m.Deleted {
-						<button class="icon-btn sm" type="button" data-reply={ m.ID } data-reply-quote={ m.Body() } title={ T(ctx, "ui2.chat.reply") } aria-label={ T(ctx, "ui2.chat.reply") }><span class="mi">reply</span></button>
-						if m.Outgoing {
-							<button class="icon-btn sm" type="button" hx-post={ c.url("/delete") } hx-vals={ jsonVals(map[string]string{"peer": m.Peer, "id": m.ID}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-confirm") } aria-label={ T(ctx, "ui2.chat.delete") }><span class="mi">delete</span></button>
-						}
-					}
-				</div>
 			</div>
 		}
 	</div>
 }
 
-// ChatRooms is the room list with the create and join forms.
-templ ChatRooms(c Chat, oob bool) {
-	<aside id="chat-rooms" class="chat-side" { oobAttrs(oob)... }>
-		<h2 class="small">{ T(ctx, "skychat.rooms") }</h2>
-		if len(c.Groups) == 0 {
-			<p class="small dim">{ T(ctx, "skychat.rooms-empty") }</p>
+templ chatMeta(c Chat, l ChatLine) {
+	<span class="tg-meta">
+		{ chatTime(l.TS) }
+		if l.Out && c.Mode != "groups" && l.ID != "" && !l.Deleted {
+			<span class="mi tg-tick" data-tick title={ T(ctx, "ui2.chat.sent") } data-sent={ T(ctx, "ui2.chat.sent") } data-received={ T(ctx, "ui2.chat.received") } data-read={ T(ctx, "ui2.chat.read") }>done</span>
 		}
-		for _, g := range c.Groups {
-			<a class={ "chat-peer", templ.KV("active", c.Group != nil && c.Group.ID == g.ID) } href={ templ.URL(c.url("?mode=groups&group=" + g.ID)) }>
-				{ g.Name }
-				switch string(g.Status) {
-					case "awaiting_approval":
-						<span class="small badge" title={ T(ctx, "ui2.chat.pending-help") }>{ T(ctx, "ui2.chat.pending") }</span>
-					case "denied":
-						<span class="small badge off" title={ T(ctx, "ui2.chat.declined-help") }>{ T(ctx, "ui2.chat.declined") }</span>
-					default:
-						<span class="small dim">{ chatGroupTerm(ctx, string(g.Mode)) } · { itoa(len(g.Members)) } { T(ctx, "skychat.members") } · { chatGroupTerm(ctx, string(g.Role)) }</span>
-				}
-			</a>
-			if string(g.Status) == "denied" {
-				<button class="btn sm" type="button" hx-post={ c.url("/groups/ask-again") } hx-vals={ jsonVals(map[string]string{"group": g.ID}) } hx-target="#chat-rooms" hx-swap="outerHTML">{ T(ctx, "skychat.ask-again") }</button>
-			}
-		}
-		<details class="add">
-			<summary class="btn sm"><span class="mi">add</span>{ T(ctx, "skychat.create-room") }</summary>
-			<form class="form" hx-post={ c.url("/groups/create") } hx-target="#chat-rooms" hx-swap="outerHTML">
-				<input name="name" required placeholder={ T(ctx, "skychat.room-name") } aria-label={ T(ctx, "skychat.room-name") }/>
-				<select name="mode" aria-label={ T(ctx, "skychat.mode-groups") }>
-					<option value="public">{ T(ctx, "ui2.chat.public") }</option>
-					<option value="private">{ T(ctx, "ui2.chat.private") }</option>
-				</select>
-				<button class="btn primary" type="submit">{ T(ctx, "skychat.create") }</button>
-			</form>
-		</details>
-		<details class="add">
-			<summary class="btn sm"><span class="mi">login</span>{ T(ctx, "skychat.join-room") }</summary>
-			<form class="form" hx-post={ c.url("/groups/join") } hx-target="#chat-rooms" hx-swap="outerHTML">
-				<input class="mono" name="invite" required placeholder={ T(ctx, "skychat.invite-link") } aria-label={ T(ctx, "skychat.invite-link") }/>
-				<button class="btn primary" type="submit">{ T(ctx, "skychat.join") }</button>
-			</form>
-		</details>
-		if c.Invite != "" {
-			<p class="small"><span class="dim">{ T(ctx, "skychat.invite-link") }:</span> <span class="mono key" data-copy={ c.Invite }>{ c.Invite }</span></p>
-		}
-		@ErrorBox(c.Err)
-	</aside>
+	</span>
 }
 
-// ChatRoomLog is a room's messages. It polls itself.
+templ chatFile(f ChatFile) {
+	<div class="tg-file">
+		if f.Thumb != "" {
+			<a href={ templ.SafeURL(f.URL) } target="_blank" rel="noopener"><img class="tg-thumb" src={ f.Thumb } alt={ f.Name } loading="lazy"/></a>
+		}
+		<div class="tg-file-row">
+			<span class="mi tg-file-icon">description</span>
+			<div class="tg-file-text">
+				if f.URL != "" {
+					<a href={ templ.SafeURL(f.URL) } download={ f.Name } title={ T(ctx, "ui2.chat.download") }>{ f.Name }</a>
+				} else {
+					<span>{ f.Name }</span>
+				}
+				<span class="small dim">
+					if f.Size > 0 {
+						{ Bytes(uint64(f.Size)) }
+					}
+					if f.URL == "" && f.Status != "" {
+						· { chatGroupTerm(ctx, f.Status) }
+					}
+				</span>
+			</div>
+		</div>
+	</div>
+}
+
+// ChatRooms is the room list.
+templ ChatRooms(c Chat, oob bool) {
+	<nav id="chat-list" class="tg-list" { oobAttrs(oob)... }>
+		@ErrorBox(c.Err)
+		if rows := c.RoomRows(); len(rows) == 0 {
+			<p class="tg-note">{ T(ctx, "skychat.rooms-empty") }</p>
+		} else {
+			for _, r := range rows {
+				@chatRow(c, r)
+			}
+		}
+	</nav>
+}
+
+// chatRoomForms are the create and join menus above the room list.
+templ chatRoomForms(c Chat) {
+	<details class="tg-pop">
+		<summary class="icon-btn" title={ T(ctx, "skychat.create-room") } aria-label={ T(ctx, "skychat.create-room") }><span class="mi">add</span></summary>
+		<form class="tg-pop-body" hx-post={ c.url("/groups/create") } hx-target="#chat-list" hx-swap="outerHTML">
+			<strong>{ T(ctx, "skychat.create-room") }</strong>
+			<input name="name" required placeholder={ T(ctx, "skychat.room-name") } aria-label={ T(ctx, "skychat.room-name") }/>
+			<select name="mode" aria-label={ T(ctx, "skychat.mode-groups") }>
+				<option value="public">{ T(ctx, "ui2.chat.public") }</option>
+				<option value="private">{ T(ctx, "ui2.chat.private") }</option>
+			</select>
+			<button class="btn primary" type="submit">{ T(ctx, "skychat.create") }</button>
+		</form>
+	</details>
+	<details class="tg-pop">
+		<summary class="icon-btn" title={ T(ctx, "skychat.join-room") } aria-label={ T(ctx, "skychat.join-room") }><span class="mi">login</span></summary>
+		<form class="tg-pop-body" hx-post={ c.url("/groups/join") } hx-target="#chat-list" hx-swap="outerHTML">
+			<strong>{ T(ctx, "skychat.join-room") }</strong>
+			<input class="mono" name="invite" required placeholder={ T(ctx, "skychat.invite-link") } aria-label={ T(ctx, "skychat.invite-link") }/>
+			<button class="btn primary" type="submit">{ T(ctx, "skychat.join") }</button>
+		</form>
+	</details>
+}
+
+// chatRoomMain is the open room: its header, messages and composer.
+templ chatRoomMain(c Chat) {
+	<section class="tg-main">
+		if c.Group == nil {
+			<div class="tg-thread">
+				@ChatRoomLog(c)
+			</div>
+		} else {
+			<header class="tg-head">
+				<a class="icon-btn tg-back" href={ templ.URL(c.url("?mode=groups")) } aria-label={ T(ctx, "ui2.chat.back") }><span class="mi">arrow_back</span></a>
+				@chatAvatar(c.Group.ID, c.Group.Name, chatGroupAvatar(c), "sm")
+				<button class="tg-head-text tg-head-btn" type="button" hx-get={ c.url("/groups/info?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML">
+					<span class="tg-title">{ c.Group.Name }</span>
+					<span class="tg-sub">{ chatGroupTerm(ctx, string(c.Group.Mode)) } · { itoa(len(c.Group.Members)) } { T(ctx, "skychat.members") } · { chatGroupTerm(ctx, string(c.Group.Role)) }</span>
+				</button>
+				<button class="icon-btn" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "skychat.invite") } aria-label={ T(ctx, "skychat.invite") }><span class="mi">link</span></button>
+				<button class="icon-btn" type="button" hx-get={ c.url("/groups/info?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.info") } aria-label={ T(ctx, "ui2.chat.info") }><span class="mi">info</span></button>
+			</header>
+			@ChatVoice(c.Voice)
+			<div class="tg-thread">
+				@ChatRoomLog(c)
+				@chatDown()
+			</div>
+			<aside id="chat-info" class="tg-info"></aside>
+			switch string(c.Group.Status) {
+				case "awaiting_approval":
+					<div class="tg-compose tg-blocked" title={ T(ctx, "ui2.chat.pending-help") }>{ T(ctx, "ui2.chat.pending-help") }</div>
+				case "denied":
+					<div class="tg-compose tg-blocked">
+						<span>{ T(ctx, "ui2.chat.declined-help") }</span>
+						<button class="btn sm" type="button" hx-post={ c.url("/groups/ask-again") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" title={ T(ctx, "skychat.ask-again-tip") }>{ T(ctx, "skychat.ask-again") }</button>
+					</div>
+				default:
+					if !c.Group.CanPost && c.Group.CannotPostReason != "" {
+						<div class="tg-compose tg-blocked">{ c.Group.CannotPostReason }</div>
+					} else {
+						<form id="chat-form" class="tg-compose" hx-post={ c.url("/groups/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
+							<input type="hidden" name="group" value={ c.Group.ID }/>
+							<div class="tg-compose-row">
+								<textarea name="text" rows="1" required placeholder={ T(ctx, "ui2.chat.placeholder") } aria-label={ T(ctx, "skychat.message") } data-enter-send></textarea>
+								<button class="tg-send" type="submit" title={ T(ctx, "skychat.send") } aria-label={ T(ctx, "skychat.send") }><span class="mi">send</span></button>
+							</div>
+						</form>
+					}
+			}
+		}
+	</section>
+}
+
+// ChatRoomLog is a room's messages. It polls itself and the room list.
 templ ChatRoomLog(c Chat) {
 	if c.Group == nil {
-		<div id="chat-log" class="chat-log"><p class="dim">{ T(ctx, "skychat.rooms-pick") }</p></div>
+		<div id="chat-log" class="tg-log"><div class="tg-log-inner"><p class="tg-note">{ T(ctx, "skychat.rooms-pick") }</p></div></div>
 	} else {
-		<div id="chat-log" class="chat-log" hx-get={ c.url("/groups/log?group=" + c.Group.ID) } hx-trigger="every 3s [document.visibilityState === 'visible']" hx-swap="outerHTML" data-follow>
-			if len(c.GMsgs) == 0 {
-				<p class="dim">{ T(ctx, "skychat.empty") }</p>
-			}
-			for _, m := range c.GMsgs {
-				@roomMsg(c, m)
-			}
+		<div id="chat-log" class="tg-log" hx-get={ c.url("/groups/log?group=" + c.Group.ID) } hx-trigger="every 3s [document.visibilityState === 'visible']" hx-swap="outerHTML" data-chat-log>
+			<div class="tg-log-inner">
+				if len(c.GMsgs) == 0 {
+					<p class="tg-note">{ T(ctx, "skychat.empty") }</p>
+				}
+				for _, l := range c.Lines(ctx, time.Now()) {
+					@chatBubble(c, l)
+				}
+			</div>
 		</div>
 	}
 }
 
-templ roomMsg(c Chat, m visorapi.GroupMessage) {
-	<div class={ "chat-msg", templ.KV("out", m.SenderPK.Hex() == c.PK) }>
-		if m.SenderPK.Hex() != c.PK {
-			<div class="small mono dim" data-label-for={ m.SenderPK.Hex() }>{ m.SenderPK.Hex() }</div>
+// ChatRoomInfo is the open room's side panel: invite link, members and
+// the moderation actions this visor may take.
+templ ChatRoomInfo(c Chat) {
+	<aside id="chat-info" class="tg-info open">
+		<div class="tg-info-head">
+			<button class="icon-btn" type="button" data-clear="#chat-info" aria-label={ T(ctx, "common.close") }><span class="mi">close</span></button>
+			<strong>{ T(ctx, "ui2.chat.info") }</strong>
+		</div>
+		if c.Group != nil {
+			<div class="tg-info-hero">
+				@chatAvatar(c.Group.ID, c.Group.Name, chatGroupAvatar(c), "lg")
+				<div class="tg-title">{ c.Group.Name }</div>
+				<div class="tg-sub">{ chatGroupTerm(ctx, string(c.Group.Mode)) } · { itoa(len(c.Group.Members)) } { T(ctx, "skychat.members") }</div>
+			</div>
+			@ErrorBox(c.Err)
+			<div class="tg-info-sec">
+				if c.Invite != "" {
+					<div class="small dim">{ T(ctx, "skychat.invite-link") }</div>
+					<div class="mono small key tg-invite" data-copy={ c.Invite } title={ T(ctx, "skychat.copy") }>{ c.Invite }</div>
+				} else {
+					<button class="btn sm" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML"><span class="mi">link</span>{ T(ctx, "skychat.invite") }</button>
+				}
+			</div>
+			if c.Moderator() {
+				<form class="tg-info-sec tg-add" hx-post={ c.url("/groups/add-member") } hx-target="#chat-info" hx-swap="outerHTML">
+					<input type="hidden" name="group" value={ c.Group.ID }/>
+					<input class="mono" name="pk" required placeholder={ T(ctx, "skychat.add-member-pk") } aria-label={ T(ctx, "skychat.add-member-pk") }/>
+					<button class="btn sm" type="submit"><span class="mi">person_add</span>{ T(ctx, "skychat.add") }</button>
+				</form>
+				if len(c.Requests) > 0 {
+					<div class="tg-info-sec">
+						<div class="small dim">{ T(ctx, "ui2.chat.requests") }</div>
+						for _, q := range c.Requests {
+							<div class="tg-member">
+								@chatAvatar(q.PK.Hex(), c.NameOf(q.PK.Hex()), c.avatarURL(q.PK.Hex()), "xs")
+								@chatName(c.NameOf(q.PK.Hex()), q.PK.Hex(), "tg-name")
+								<button class="icon-btn" type="button" hx-post={ c.url("/groups/request") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "pk": q.PK.Hex(), "action": "approve"}) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.approve") } aria-label={ T(ctx, "ui2.chat.approve") }><span class="mi">check</span></button>
+								<button class="icon-btn" type="button" hx-post={ c.url("/groups/request") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "pk": q.PK.Hex(), "action": "deny"}) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.deny") } aria-label={ T(ctx, "ui2.chat.deny") }><span class="mi">close</span></button>
+							</div>
+						}
+					</div>
+				}
+			}
+			<div class="tg-info-sec">
+				<div class="small dim">{ T(ctx, "ui2.chat.members-title") }</div>
+				for _, m := range c.MemberRows() {
+					<div class="tg-member" data-labels>
+						@chatAvatar(m.PK, m.Name, c.avatarURL(m.PK), "xs")
+						@chatName(m.Name, m.PK, "tg-name")
+						if m.Role != "" {
+							<span class="badge">{ chatGroupTerm(ctx, m.Role) }</span>
+						}
+						if m.Muted {
+							<span class="mi dim" title={ T(ctx, "ui2.chat.muted") }>volume_off</span>
+						}
+						if c.Moderator() && !m.Self && m.Role != "owner" {
+							@chatMemberAction(c, m.PK, "mute", m.Muted)
+							if c.Owner() {
+								@chatMemberAction(c, m.PK, "admin", m.Role == "admin")
+							}
+							@chatMemberAction(c, m.PK, "remove", false)
+						}
+					</div>
+				}
+			</div>
+			<div class="tg-info-sec">
+				if c.Owner() {
+					<button class="btn sm warn" type="button" hx-post={ c.url("/groups/delete") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.delete-group-confirm") }><span class="mi">delete</span>{ T(ctx, "ui2.chat.delete-group") }</button>
+				} else {
+					<button class="btn sm warn" type="button" hx-post={ c.url("/groups/leave") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.leave-confirm") }><span class="mi">logout</span>{ T(ctx, "ui2.chat.leave") }</button>
+				}
+			</div>
 		}
-		<div class="chat-text">{ m.Text }</div>
-		<div class="small dim chat-meta">{ chatTime(m.TS) }</div>
-	</div>
+	</aside>
 }
 
-// chatRoomTools are the invite and add member controls of a room.
-templ chatRoomTools(c Chat) {
-	<div class="bar">
-		<button class="btn sm" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-rooms" hx-swap="outerHTML"><span class="mi">link</span>{ T(ctx, "skychat.invite") }</button>
-		if c.Group.Role == "owner" || c.Group.Role == "admin" {
-			<form class="bar" hx-post={ c.url("/groups/add-member") } hx-target="#chat-rooms" hx-swap="outerHTML">
-				<input type="hidden" name="group" value={ c.Group.ID }/>
-				<input class="mono filter" name="pk" required placeholder={ T(ctx, "skychat.add-member-pk") } aria-label={ T(ctx, "skychat.add-member-pk") }/>
-				<button class="btn sm" type="submit">{ T(ctx, "skychat.add") }</button>
-			</form>
-		}
-	</div>
+// chatMemberAction is one moderation button: mute, admin or remove, which
+// toggles off when on is set.
+templ chatMemberAction(c Chat, pk, action string, on bool) {
+	<button class="icon-btn" type="button" hx-post={ c.url("/groups/member") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "pk": pk, "action": chatMemberVerb(action, on)}) } hx-target="#chat-info" hx-swap="outerHTML" hx-confirm={ chatMemberConfirm(ctx, action) } title={ T(ctx, "ui2.chat."+chatMemberVerb(action, on)) } aria-label={ T(ctx, "ui2.chat."+chatMemberVerb(action, on)) }><span class="mi">{ chatMemberIcon(action, on) }</span></button>
 }
 
 // ChatPassword sets, changes or removes the password of skychat's
 // standalone page, as the Angular chat tab's password panel.
 templ ChatPassword(c Chat) {
-	<details id="chat-pw" class="add" open?={ c.PwErr != "" }>
-		<summary class="btn sm">
-			<span class="mi">lock</span>
+	<details id="chat-pw" class="tg-pop right" open?={ c.PwErr != "" }>
+		<summary class="icon-btn" title={ chatPwTitle(ctx, c.PwSet) } aria-label={ chatPwTitle(ctx, c.PwSet) }>
 			if c.PwSet {
-				{ T(ctx, "skychat.password.change") }
+				<span class="mi">lock</span>
 			} else {
-				{ T(ctx, "skychat.password.set") }
+				<span class="mi">lock_open</span>
 			}
 		</summary>
-		<p class="small dim">
-			if c.PwSet {
-				{ T(ctx, "skychat.password.help-set") }
-			} else {
-				{ T(ctx, "skychat.password.help-unset") }
-			}
-		</p>
-		@ErrorBox(c.PwErr)
-		<form class="form narrow-form" hx-post={ c.url("/password") } hx-target="#chat-pw" hx-swap="outerHTML">
-			if c.PwSet {
-				<label>{ T(ctx, "skychat.password.old") }<input type="password" name="old" autocomplete="new-password"/></label>
-			}
-			<label>{ T(ctx, "skychat.password.new") }<input type="password" name="new" autocomplete="new-password"/></label>
-			<label>{ T(ctx, "skychat.password.confirm") }<input type="password" name="confirm" autocomplete="new-password"/></label>
-			<div class="bar">
-				<button class="btn primary" type="submit">{ T(ctx, "common.save") }</button>
+		<div class="tg-pop-body">
+			<p class="small dim">
 				if c.PwSet {
-					<button class="btn" type="submit" name="clear" value="1">{ T(ctx, "skychat.password.clear") }</button>
+					{ T(ctx, "skychat.password.help-set") }
+				} else {
+					{ T(ctx, "skychat.password.help-unset") }
 				}
-			</div>
-		</form>
+			</p>
+			@ErrorBox(c.PwErr)
+			<form class="form" hx-post={ c.url("/password") } hx-target="#chat-pw" hx-swap="outerHTML">
+				if c.PwSet {
+					<label>{ T(ctx, "skychat.password.old") }<input type="password" name="old" autocomplete="new-password"/></label>
+				}
+				<label>{ T(ctx, "skychat.password.new") }<input type="password" name="new" autocomplete="new-password"/></label>
+				<label>{ T(ctx, "skychat.password.confirm") }<input type="password" name="confirm" autocomplete="new-password"/></label>
+				<div class="bar">
+					<button class="btn primary" type="submit">{ T(ctx, "common.save") }</button>
+					if c.PwSet {
+						<button class="btn" type="submit" name="clear" value="1">{ T(ctx, "skychat.password.clear") }</button>
+					}
+				</div>
+			</form>
+		</div>
 	</details>
 }
