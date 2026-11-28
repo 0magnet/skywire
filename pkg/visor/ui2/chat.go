@@ -760,7 +760,10 @@ func parseGroupEnvelope(text, key string) (groupEnvelope, bool) {
 		return groupEnvelope{}, false
 	}
 	var env groupEnvelope
-	return env, json.Unmarshal([]byte(t), &env) == nil
+	if err := json.Unmarshal([]byte(t), &env); err != nil {
+		return groupEnvelope{}, false
+	}
+	return env, true
 }
 
 func parseGroupFile(text string) (groupFile, bool) {

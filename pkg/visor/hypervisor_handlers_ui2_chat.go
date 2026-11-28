@@ -1,3 +1,5 @@
+//go:build !mobile
+
 // Package visor pkg/visor/hypervisor_handlers_ui2_chat.go c3-vis-core
 package visor
 
