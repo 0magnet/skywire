@@ -581,6 +581,7 @@ fieldset.choice legend { padding: 0; margin-bottom: 4px; }
 .tg-down { position: absolute; right: 16px; bottom: 12px; width: 44px; height: 44px; border-radius: 50%; border: 0; cursor: pointer; background: var(--bar-bg); color: rgba(var(--fg), 0.8); box-shadow: 0 1px 6px rgba(var(--shade), 0.4), 0 0 0 1px var(--tg-line); display: inline-flex; align-items: center; justify-content: center; }
 .tg-down[hidden] { display: none; }
 .tg-down .mi { font-size: 28px; }
+.tg-down.new::after { content: ""; position: absolute; top: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bar-bg); }
 
 .tg-compose { max-width: 760px; width: 100%; margin: 0 auto; padding: 4px 16px 14px; }
 .tg-compose-row { display: flex; align-items: flex-end; gap: 8px; }
