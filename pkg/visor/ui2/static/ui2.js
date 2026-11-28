@@ -581,27 +581,53 @@ document.addEventListener('DOMContentLoaded', function () {
 		}
 	});
 
-	// The log keeps its distance from the bottom across polls: at the bottom
-	// it follows new messages, scrolled up it stays where the reader is.
-	var fromEnd = 0, first = true;
-	function down() {
+	// A poll that brings nothing new is not swapped in, and a swap keeps the
+	// reader's place before the browser paints: at the bottom it follows new
+	// messages, scrolled up it stays put and the down button shows a dot.
+	var fromEnd = 0, prevTop = 0, height = 0, first = true, swapped = false, last = {};
+	function down(grew) {
 		var l = log(), b = document.querySelector('[data-chat-down]');
-		if (l && b) b.hidden = l.scrollHeight - l.scrollTop - l.clientHeight < 200;
+		if (!l || !b) return;
+		var away = l.scrollHeight - l.scrollTop - l.clientHeight >= 200;
+		if (!away) b.classList.remove('new');
+		else if (grew) b.classList.add('new');
+		b.hidden = !away;
 	}
 	document.addEventListener('htmx:beforeSwap', function (e) {
 		var l = log();
-		if (l && e.detail.target === l) fromEnd = l.scrollHeight - l.scrollTop - l.clientHeight;
+		if (!l || e.detail.target !== l) return;
+		var rc = e.detail.requestConfig || {}, key = rc.path || 'log';
+		if (rc.verb === 'get') {
+			if (last[key] === e.detail.serverResponse) { e.detail.shouldSwap = false; return; }
+			last[key] = e.detail.serverResponse;
+			fromEnd = l.scrollHeight - l.scrollTop - l.clientHeight;
+		} else {
+			last = {};
+			fromEnd = 0;
+		}
+		prevTop = l.scrollTop;
+		height = l.scrollHeight;
+		swapped = true;
+	});
+	document.addEventListener('htmx:afterSwap', function () {
+		if (!swapped) return;
+		swapped = false;
+		var l = log();
+		if (!l) return;
+		var grew = l.scrollHeight > height;
+		if (fromEnd < 40) {
+			l.scrollTop = Math.max(prevTop, height - l.clientHeight);
+			if (l.scrollHeight - l.clientHeight - l.scrollTop > 2) l.scrollTo({ top: l.scrollHeight, behavior: 'smooth' });
+		} else {
+			l.scrollTop = prevTop;
+		}
+		down(grew);
 	});
 	function place() {
 		var l = log();
-		if (!l) return;
-		if (first) {
-			l.scrollTop = l.scrollHeight;
-			first = false;
-		} else {
-			l.scrollTop = l.scrollHeight - l.clientHeight - fromEnd;
-			if (fromEnd < 40 && l.scrollHeight - l.clientHeight - l.scrollTop > 2) l.scrollTo({ top: l.scrollHeight, behavior: 'smooth' });
-		}
+		if (!l || !first) return;
+		l.scrollTop = l.scrollHeight;
+		first = false;
 		down();
 	}
 	document.addEventListener('scroll', function (e) { if (e.target && e.target.id === 'chat-log') down(); }, true);
@@ -698,11 +724,10 @@ document.addEventListener('DOMContentLoaded', function () {
 		};
 	}
 
-	function settle(e) {
+	function settle() {
 		if (!root()) return;
 		fit();
-		var el = e && e.detail && e.detail.elt;
-		if (!el || el.id === 'chat-log' || first) place();
+		place();
 		filter();
 		badges();
 		applyTicks();
