@@ -1,6 +1,9 @@
 package ui2
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // ChatPage is the chat tab, laid out after Telegram Web: the chat list on
 // the left and the open thread on the right, one at a time on a phone.
@@ -20,12 +23,13 @@ templ ChatPage(c Chat) {
 						<span class="spacer"></span>
 						<span class="tg-conn" data-chat-conn hidden data-on={ T(ctx, "skychat.connected") } data-off={ T(ctx, "skychat.disconnected") }></span>
 						@ChatNotifyAll(c)
+						@ChatSettings(c)
 						@ChatPassword(c)
 					</div>
 					<div class="tg-side-tools">
 						<label class="tg-search">
 							<span class="mi">search</span>
-							<input type="search" data-chat-search placeholder={ T(ctx, "ui2.chat.search") } aria-label={ T(ctx, "ui2.chat.search") } autocomplete="off"/>
+							<input type="search" name="q" data-chat-search placeholder={ T(ctx, "ui2.chat.search") } aria-label={ T(ctx, "ui2.chat.search") } autocomplete="off" hx-get={ c.url("/search") } hx-trigger="input changed delay:400ms, search" hx-target="#chat-hits" hx-swap="outerHTML"/>
 						</label>
 						if c.Mode == "groups" {
 							@chatRoomForms(c)
@@ -33,6 +37,7 @@ templ ChatPage(c Chat) {
 							<a class="icon-btn" href={ templ.URL(c.url("?mode=dm&new=1")) } title={ T(ctx, "ui2.chat.new-message") } aria-label={ T(ctx, "ui2.chat.new-message") }><span class="mi">edit</span></a>
 						}
 					</div>
+					@ChatHits(c)
 					if c.Mode == "groups" {
 						@ChatRooms(c, false)
 					} else {
@@ -61,7 +66,7 @@ templ chatDirectMain(c Chat) {
 					<div class="tg-sub mono" data-copy={ c.Peer } title={ T(ctx, "nodes.copy-key") }>{ c.Peer }</div>
 				</div>
 				@ChatMute(c, c.Peer)
-				<button class="icon-btn" type="button" hx-post={ c.url("/forget") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.delete-chat-confirm") } title={ T(ctx, "ui2.chat.delete-chat") } aria-label={ T(ctx, "ui2.chat.delete-chat") }><span class="mi">delete_sweep</span></button>
+				@chatPeerMenu(c)
 				if !c.Voice.Off {
 					<button class="icon-btn" type="button" hx-post={ c.Voice.url("/call") } hx-vals={ jsonVals(c.Voice.vals(nil)) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.call-tip") } aria-label={ T(ctx, "skychat.voice.call") }><span class="mi">call</span></button>
 				}
@@ -77,6 +82,13 @@ templ chatDirectMain(c Chat) {
 			@ChatLog(c)
 			@chatDown()
 		</div>
+		if c.Privacy.Requesting(c.Peer) {
+			<div class="tg-compose tg-blocked">
+				<span>{ T(ctx, "ui2.chat.request-help") }</span>
+				@chatPrivacyButton(c, c.Peer, "accept", "check", "ui2.chat.accept")
+				@chatPrivacyButton(c, c.Peer, "block", "block", "ui2.chat.block")
+			</div>
+		}
 		<form id="chat-form" class="tg-compose" hx-post={ c.url("/send") } hx-target="#chat-log" hx-swap="outerHTML" data-reset-on-ok>
 			if c.Peer != "" {
 				<input type="hidden" name="to" value={ c.Peer }/>
@@ -169,6 +181,9 @@ templ chatRow(c Chat, r ChatRow) {
 							<span class="tg-preview"></span>
 						}
 				}
+				if c.Privacy.Requesting(r.ID) {
+					<span class="badge">{ T(ctx, "ui2.chat.request") }</span>
+				}
 				<span class="tg-badge" data-badge hidden></span>
 			</div>
 		</div>
@@ -231,6 +246,12 @@ templ chatBubble(c Chat, l ChatLine) {
 				<button class="icon-btn" type="button" data-reply={ l.ID } data-reply-quote={ l.Text } title={ T(ctx, "ui2.chat.reply") } aria-label={ T(ctx, "ui2.chat.reply") }><span class="mi">reply</span></button>
 				if l.Out && c.Mode != "groups" {
 					<button class="icon-btn" type="button" hx-post={ c.url("/delete") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer, "id": l.ID}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-confirm") } title={ T(ctx, "ui2.chat.delete") } aria-label={ T(ctx, "ui2.chat.delete") }><span class="mi">delete</span></button>
+				}
+				if c.Mode != "groups" {
+					<button class="icon-btn" type="button" hx-post={ c.url("/forget-message") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer, "id": l.ID}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-mine-confirm") } title={ T(ctx, "ui2.chat.delete-mine") } aria-label={ T(ctx, "ui2.chat.delete-mine") }><span class="mi">remove_circle_outline</span></button>
+				}
+				if l.Out && c.Mode == "groups" && l.TSNano != 0 {
+					<button class="icon-btn" type="button" hx-post={ c.url("/groups/unsend") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "ts": strconv.FormatInt(l.TSNano, 10)}) } hx-target="#chat-log" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.delete-confirm") } title={ T(ctx, "ui2.chat.delete") } aria-label={ T(ctx, "ui2.chat.delete") }><span class="mi">delete</span></button>
 				}
 			</div>
 		}
@@ -419,6 +440,9 @@ templ ChatRoomInfo(c Chat) {
 				}
 			</div>
 			if c.Moderator() {
+				@chatRoomSettings(c)
+			}
+			if c.Moderator() {
 				<form class="tg-info-sec tg-add" hx-post={ c.url("/groups/add-member") } hx-target="#chat-info" hx-swap="outerHTML">
 					<input type="hidden" name="group" value={ c.Group.ID }/>
 					<input class="mono" name="pk" required placeholder={ T(ctx, "skychat.add-member-pk") } aria-label={ T(ctx, "skychat.add-member-pk") }/>
@@ -564,4 +588,109 @@ templ chatRoomMenu(c Chat) {
 			}
 		</div>
 	</details>
+}
+
+// ChatHits are the messages a search found, above the chat list.
+templ ChatHits(c Chat) {
+	<div id="chat-hits" class="tg-hits">
+		if c.Query != "" {
+			<div class="small dim tg-hits-head">{ T(ctx, "ui2.chat.search-hits", "count", itoa(len(c.Hits))) }</div>
+			for _, h := range c.Hits {
+				<a class="tg-hit" href={ templ.URL(c.HitHref(h)) }>
+					<div class="tg-row-top">
+						<span class="tg-name">{ c.HitTitle(h) }</span>
+						<span class="tg-time">{ chatListTime(h.TS, time.Now()) }</span>
+					</div>
+					<div class="tg-preview">{ chatClip(groupText(h.Text), 90) }</div>
+				</a>
+			}
+		}
+	</div>
+}
+
+// chatPrivacyButton accepts, blocks or unblocks a peer.
+templ chatPrivacyButton(c Chat, pk, action, icon, label string) {
+	<button class="btn sm" type="button" hx-post={ c.url("/privacy") } hx-vals={ jsonVals(map[string]string{"pk": pk, "action": action, "peer": c.Peer}) } hx-swap="none"><span class="mi">{ icon }</span>{ T(ctx, label) }</button>
+}
+
+// chatPeerMenu is a direct chat's header menu: block or unblock, add to
+// contacts, delete the chat.
+templ chatPeerMenu(c Chat) {
+	<details class="tg-pop right">
+		<summary class="icon-btn" title={ T(ctx, "ui2.chat.more") } aria-label={ T(ctx, "ui2.chat.more") }><span class="mi">more_vert</span></summary>
+		<div class="tg-pop-body tg-menu">
+			if c.NameOf(c.Peer) == "" {
+				<button class="tg-menu-item" type="button" hx-post={ c.url("/contact") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer}) } hx-prompt={ T(ctx, "ui2.chat.add-contact-prompt") } hx-swap="none"><span class="mi">person_add</span>{ T(ctx, "ui2.chat.add-contact") }</button>
+			}
+			if c.Privacy != nil {
+				if c.Privacy.BlockedKey(c.Peer) {
+					<button class="tg-menu-item" type="button" hx-post={ c.url("/privacy") } hx-vals={ jsonVals(map[string]string{"pk": c.Peer, "action": "unblock", "peer": c.Peer}) } hx-swap="none"><span class="mi">lock_open</span>{ T(ctx, "ui2.chat.unblock") }</button>
+				} else {
+					<button class="tg-menu-item warn" type="button" hx-post={ c.url("/privacy") } hx-vals={ jsonVals(map[string]string{"pk": c.Peer, "action": "block", "peer": c.Peer}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.block-confirm") }><span class="mi">block</span>{ T(ctx, "ui2.chat.block") }</button>
+				}
+			}
+			<button class="tg-menu-item warn" type="button" hx-post={ c.url("/forget") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.delete-chat-confirm") }><span class="mi">delete_sweep</span>{ T(ctx, "ui2.chat.delete-chat") }</button>
+		</div>
+	</details>
+}
+
+// ChatSettings is the sidebar's settings: this visor's skychat name, who may
+// message it, and the blocked peers.
+templ ChatSettings(c Chat) {
+	<details id="chat-settings" class="tg-pop right">
+		<summary class="icon-btn" title={ T(ctx, "ui2.chat.settings") } aria-label={ T(ctx, "ui2.chat.settings") }><span class="mi">tune</span></summary>
+		<div class="tg-pop-body">
+			if c.Profile != nil {
+				<form class="form" hx-post={ c.url("/profile") } hx-target="#chat-settings" hx-swap="outerHTML">
+					<input type="hidden" name="mode" value={ chatMode(c) }/>
+					<label>{ T(ctx, "ui2.chat.my-name") }<input name="name" value={ c.Profile.Name } maxlength="64"/></label>
+					<div class="bar">
+						<button class="btn sm primary" type="submit">{ T(ctx, "common.save") }</button>
+						if c.Profile.Avatar != "" {
+							<button class="btn sm" type="submit" name="clear_avatar" value="1">{ T(ctx, "ui2.chat.clear-avatar") }</button>
+						}
+					</div>
+				</form>
+			}
+			if c.Privacy != nil {
+				<label class="tg-check">
+					<input type="checkbox" checked?={ c.Privacy.Approval } hx-post={ c.url("/privacy") } hx-vals={ jsonVals(map[string]string{"action": b01Approval(c.Privacy.Approval), "mode": chatMode(c)}) } hx-target="#chat-settings" hx-swap="outerHTML"/>
+					{ T(ctx, "ui2.chat.approval") }
+				</label>
+				if len(c.Privacy.Blocked) > 0 {
+					<div class="small dim">{ T(ctx, "ui2.chat.blocked") }</div>
+					for _, pk := range c.Privacy.Blocked {
+						<div class="tg-member" data-labels>
+							@chatName(c.NameOf(pk), pk, "tg-name")
+							<button class="icon-btn" type="button" hx-post={ c.url("/privacy") } hx-vals={ jsonVals(map[string]string{"pk": pk, "action": "unblock", "mode": chatMode(c)}) } hx-target="#chat-settings" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.unblock") } aria-label={ T(ctx, "ui2.chat.unblock") }><span class="mi">lock_open</span></button>
+						</div>
+					}
+				}
+			}
+		</div>
+	</details>
+}
+
+// chatRoomSettings are a room's settings for its admins: name, read only,
+// listed in the catalog, and a new key for the owner.
+templ chatRoomSettings(c Chat) {
+	<form class="tg-info-sec tg-add" hx-post={ c.url("/groups/settings") } hx-target="#chat-info" hx-swap="outerHTML">
+		<input type="hidden" name="group" value={ c.Group.ID }/>
+		<input type="hidden" name="action" value="rename"/>
+		<input name="name" required value={ c.Group.Name } aria-label={ T(ctx, "skychat.room-name") } maxlength="64"/>
+		<button class="btn sm" type="submit">{ T(ctx, "common.save") }</button>
+	</form>
+	<div class="tg-info-sec">
+		<label class="tg-check">
+			<input type="checkbox" checked?={ c.Group.ReadOnly } hx-post={ c.url("/groups/settings") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "action": "readonly", "on": b01(!c.Group.ReadOnly)}) } hx-target="#chat-info" hx-swap="outerHTML"/>
+			{ T(ctx, "ui2.chat.read-only") }
+		</label>
+		<label class="tg-check">
+			<input type="checkbox" checked?={ c.Group.Listed } hx-post={ c.url("/groups/settings") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "action": "listed", "on": b01(!c.Group.Listed)}) } hx-target="#chat-info" hx-swap="outerHTML"/>
+			{ T(ctx, "ui2.chat.listed") }
+		</label>
+		if c.Owner() {
+			<button class="btn sm" type="button" hx-post={ c.url("/groups/settings") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "action": "rotate"}) } hx-target="#chat-info" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.rotate-confirm") }><span class="mi">key</span>{ T(ctx, "ui2.chat.rotate") }</button>
+		}
+	</div>
 }

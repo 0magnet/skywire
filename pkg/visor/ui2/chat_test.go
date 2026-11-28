@@ -3,6 +3,7 @@ package ui2
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -153,4 +154,48 @@ func TestChatEndedRooms(t *testing.T) {
 	require.Contains(t, out, "You are no longer in this room.")
 	c.Group = &c.Groups[0]
 	require.Contains(t, renderEN(t, ChatPage(c)), "Leave room")
+}
+
+func TestChatGroupEnvelopes(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	peer, _ := cipher.GenerateKeyPair()
+	ts := time.Date(2026, 11, 28, 10, 0, 0, 0, time.UTC)
+	tomb, err := GroupDeleteBody(ts.Add(time.Minute).UnixNano())
+	require.NoError(t, err)
+	require.Equal(t, `{"skychat_delete":{"to_ts_nano":`+strconv.FormatInt(ts.Add(time.Minute).UnixNano(), 10)+`}}`, tomb)
+	c := Chat{PK: pk.Hex(), Mode: "groups", Groups: []visorapi.GroupInfo{{ID: "g1", Name: "room"}}}
+	c.Group = &c.Groups[0]
+	c.GMsgs = []visorapi.GroupMessage{
+		{GroupID: "g1", SenderPK: peer, Text: `{"skychat_file":{"id":"f1","name":"map.png","size":2048}}`, TS: ts},
+		{GroupID: "g1", SenderPK: peer, Text: "oops", TS: ts.Add(time.Minute)},
+		{GroupID: "g1", SenderPK: peer, Text: `{"skychat_forward":{"text":"passed on"}}`, TS: ts.Add(2 * time.Minute)},
+		{GroupID: "g1", SenderPK: peer, Text: tomb, TS: ts.Add(3 * time.Minute)},
+		{GroupID: "g1", SenderPK: pk, Text: "mine", TS: ts.Add(4 * time.Minute)},
+	}
+	c.AllGMsgs = c.GMsgs
+	ls := c.Lines(renderCtx(), ts)
+	require.Len(t, ls, 3, "the tombstone and the message it deletes are hidden")
+	require.Equal(t, "map.png", ls[0].File.Name)
+	require.Empty(t, ls[0].Text)
+	require.True(t, ls[1].Forwarded)
+	require.Equal(t, "passed on", ls[1].Text)
+	require.Equal(t, ts.Add(4*time.Minute).UnixNano(), ls[2].TSNano)
+	require.Contains(t, renderEN(t, ChatRoomLog(c)), "groups/unsend")
+}
+
+func TestChatPrivacyAndSearch(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	peer, _ := cipher.GenerateKeyPair()
+	c := Chat{PK: pk.Hex(), Peer: peer.Hex(), Voice: Voice{Off: true}, History: true,
+		Privacy: &ChatPrivacy{Approval: true, Requests: []string{peer.Hex()}}}
+	c = ChatOf(c, []ChatMsg{{Peer: peer.Hex(), Text: "hello", ID: "1", TS: time.Now()}})
+	out := renderEN(t, ChatPage(c))
+	require.Contains(t, out, "Accept")
+	require.Contains(t, out, ">request<")
+	require.Contains(t, out, "Delete for me")
+	c.Query = "hel"
+	c.Hits = []ChatHit{{Peer: peer.Hex(), Text: "hello", TS: time.Now()}}
+	hits := renderEN(t, ChatHits(c))
+	require.Contains(t, hits, "1 messages found")
+	require.Contains(t, hits, "peer="+peer.Hex())
 }
