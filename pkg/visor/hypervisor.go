@@ -103,6 +103,10 @@ type Hypervisor struct {
 	// write (hypervisor_known_visors.go).
 	knownMu      sync.Mutex
 	knownWritten []byte
+
+	// chat holds the chat tab's profile cache and sent read receipts
+	// (hypervisor_handlers_ui2_chat.go).
+	chat ui2ChatState
 }
 
 // cachedSummary is one entry in Hypervisor.summaryCache.

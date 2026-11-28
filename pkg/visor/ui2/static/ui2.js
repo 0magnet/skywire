@@ -528,16 +528,30 @@ document.addEventListener('DOMContentLoaded', function () {
 	document.addEventListener('DOMContentLoaded', apply);
 })();
 
-// Chat: reply to a message, Ctrl+Enter sends, and a sent form is cleared.
+// Chat: the Telegram style tab. Replies, Enter to send, a log that keeps its
+// place across polls, unread badges, search, delivery ticks and a live
+// stream from skychat's /sse.
 (function () {
 	'use strict';
+	function root() { return document.querySelector('[data-chat]'); }
+	function log() { return document.getElementById('chat-log'); }
+	function load(k) { try { return localStorage.getItem(k); } catch (_) { return null; } }
+	function store(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* private mode */ } }
+
+	// The page sits under the top bar and tabs, so size it to what is left.
+	function fit() {
+		var r = root();
+		if (r) r.style.setProperty('--tg-top', Math.max(0, r.getBoundingClientRect().top + window.scrollY) + 'px');
+	}
+	window.addEventListener('resize', fit);
+
 	document.addEventListener('click', function (e) {
 		if (!e.target.closest) return;
 		var f = document.getElementById('chat-form');
 		var r = e.target.closest('[data-reply]');
 		if (r && f) {
 			f.querySelector('[data-reply-input]').value = r.getAttribute('data-reply');
-			f.querySelector('[data-reply-text]').textContent = '↩ ' + (r.getAttribute('data-reply-quote') || '').slice(0, 80);
+			f.querySelector('[data-reply-text]').textContent = (r.getAttribute('data-reply-quote') || '').slice(0, 120);
 			f.querySelector('[data-reply-show]').hidden = false;
 			var ta = f.querySelector('textarea');
 			if (ta) ta.focus();
@@ -546,31 +560,155 @@ document.addEventListener('DOMContentLoaded', function () {
 		if (e.target.closest('[data-reply-cancel]') && f) {
 			f.querySelector('[data-reply-input]').value = '';
 			f.querySelector('[data-reply-show]').hidden = true;
+			return;
+		}
+		var q = e.target.closest('[data-quote-of]');
+		if (q) {
+			e.preventDefault();
+			var m = document.querySelector('[data-msg="' + q.getAttribute('data-quote-of') + '"]');
+			if (m) {
+				m.scrollIntoView({ behavior: 'smooth', block: 'center' });
+				m.classList.add('flash');
+				setTimeout(function () { m.classList.remove('flash'); }, 1200);
+			}
+			return;
+		}
+		if (e.target.closest('[data-chat-down]')) {
+			var l = log();
+			if (l) l.scrollTo({ top: l.scrollHeight, behavior: 'smooth' });
 		}
 	});
-	// The log stays at its newest message across polls unless the reader scrolled up.
-	var atEnd = true;
-	function toEnd() { var l = document.getElementById('chat-log'); if (l && atEnd) l.scrollTop = l.scrollHeight; }
+
+	// The log keeps its distance from the bottom across polls: at the bottom
+	// it follows new messages, scrolled up it stays where the reader is.
+	var fromEnd = 0, first = true;
+	function down() {
+		var l = log(), b = document.querySelector('[data-chat-down]');
+		if (l && b) b.hidden = l.scrollHeight - l.scrollTop - l.clientHeight < 200;
+	}
 	document.addEventListener('htmx:beforeSwap', function (e) {
-		var l = document.getElementById('chat-log');
-		if (l && e.detail.target === l) atEnd = l.scrollHeight - l.scrollTop - l.clientHeight < 40;
+		var l = log();
+		if (l && e.detail.target === l) fromEnd = l.scrollHeight - l.scrollTop - l.clientHeight;
 	});
-	document.addEventListener('htmx:afterSettle', toEnd);
-	document.addEventListener('DOMContentLoaded', toEnd);
-	window.addEventListener('load', toEnd);
+	function place() {
+		var l = log();
+		if (!l) return;
+		if (first) {
+			l.scrollTop = l.scrollHeight;
+			first = false;
+		} else {
+			l.scrollTop = l.scrollHeight - l.clientHeight - fromEnd;
+			if (fromEnd < 40 && l.scrollHeight - l.clientHeight - l.scrollTop > 2) l.scrollTo({ top: l.scrollHeight, behavior: 'smooth' });
+		}
+		down();
+	}
+	document.addEventListener('scroll', function (e) { if (e.target && e.target.id === 'chat-log') down(); }, true);
+
+	// Enter sends and Shift+Enter breaks the line, on a keyboard; on a touch
+	// screen Enter breaks the line and the button sends. The box grows with
+	// its text.
+	var keyboard = window.matchMedia && window.matchMedia('(pointer: fine)').matches;
 	document.addEventListener('keydown', function (e) {
-		if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey) || !e.target.matches || !e.target.matches('[data-ctrl-enter]')) return;
+		if (e.key !== 'Enter' || e.shiftKey || e.isComposing || !e.target.matches || !e.target.matches('[data-enter-send]')) return;
+		if (!keyboard && !(e.ctrlKey || e.metaKey)) return;
 		e.preventDefault();
-		if (e.target.form) e.target.form.requestSubmit();
+		if (e.target.form && e.target.value.trim()) e.target.form.requestSubmit();
 	});
+	function grow(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight + 2, window.innerHeight * 0.4) + 'px'; }
+	document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('[data-enter-send]')) grow(e.target); });
 	document.addEventListener('htmx:afterRequest', function (e) {
 		var el = e.detail.elt;
 		if (!e.detail.successful || !el || !el.matches || !el.matches('form[data-reset-on-ok]')) return;
 		var ta = el.querySelector('textarea');
-		if (ta) ta.value = '';
+		if (ta) { ta.value = ''; grow(ta); ta.focus(); }
 		var ri = el.querySelector('[data-reply-input]');
 		if (ri) { ri.value = ''; el.querySelector('[data-reply-show]').hidden = true; }
+		fromEnd = 0;
 	});
+
+	// A profile picture that does not load leaves the initials.
+	document.addEventListener('error', function (e) {
+		if (e.target.matches && e.target.matches('.tg-av img')) e.target.remove();
+	}, true);
+
+	// Search filters the list by name, key and last message.
+	function filter() {
+		var i = document.querySelector('[data-chat-search]'), q = i ? i.value.trim().toLowerCase() : '';
+		document.querySelectorAll('#chat-list [data-search]').forEach(function (r) {
+			r.hidden = q !== '' && r.getAttribute('data-search').indexOf(q) < 0;
+		});
+	}
+	document.addEventListener('input', function (e) { if (e.target.matches && e.target.matches('[data-chat-search]')) filter(); });
+
+	// Unread badges: this browser keeps when it last saw each conversation.
+	// The first visit counts everything as read.
+	function badges() {
+		var r = root();
+		if (!r) return;
+		var key = 'ui2-chat-seen-' + r.getAttribute('data-chat-pk'), raw = load(key), seen = {}, fresh = raw === null;
+		try { seen = JSON.parse(raw || '{}') || {}; } catch (_) { seen = {}; }
+		var open = r.getAttribute('data-chat-open'), visible = document.visibilityState === 'visible';
+		document.querySelectorAll('#chat-list [data-conv]').forEach(function (row) {
+			var id = row.getAttribute('data-conv'), ins = (row.getAttribute('data-in') || '').split(' ').filter(Boolean).map(Number);
+			var newest = ins.length ? ins[ins.length - 1] : 0;
+			if (fresh || (id === open && visible)) seen[id] = Math.max(seen[id] || 0, newest);
+			var n = ins.filter(function (t) { return t > (seen[id] || 0); }).length, b = row.querySelector('[data-badge]');
+			if (b) { b.textContent = n > 99 ? '99+' : String(n); b.hidden = n === 0; }
+		});
+		store(key, JSON.stringify(seen));
+	}
+	document.addEventListener('visibilitychange', badges);
+
+	// Delivery ticks and new messages arrive on skychat's event stream,
+	// through the hypervisor's proxy, as the Angular tab reads them.
+	var ticks = {}, es = null, poke = 0;
+	function applyTicks() {
+		document.querySelectorAll('[data-tick]').forEach(function (t) {
+			var m = t.closest('[data-msg]'), s = m && ticks[m.getAttribute('data-msg')];
+			t.textContent = s ? 'done_all' : 'done';
+			t.classList.toggle('read', s === 'read');
+			t.title = t.getAttribute('data-' + (s || 'sent')) || '';
+		});
+	}
+	function stream() {
+		var r = root();
+		if (!r || es || !window.EventSource || r.getAttribute('data-chat-mode') !== 'dm') return;
+		var conn = r.querySelector('[data-chat-conn]');
+		function state(on) {
+			if (!conn) return;
+			conn.hidden = false;
+			conn.classList.toggle('on', on);
+			conn.title = conn.getAttribute(on ? 'data-on' : 'data-off');
+		}
+		es = new EventSource('api/visors/' + r.getAttribute('data-chat-pk') + '/skychat/proxy/sse');
+		es.onopen = function () { state(true); };
+		es.onerror = function () { state(false); };
+		es.onmessage = function (ev) {
+			var d;
+			try { d = JSON.parse(ev.data); } catch (_) { return; }
+			if (!d || typeof d !== 'object') return;
+			if (d.channel === 'dm-status') {
+				if ((d.status === 'received' || d.status === 'read') && d.id && ticks[d.id] !== 'read') { ticks[d.id] = d.status; applyTicks(); return; }
+				if (d.status !== 'deleted') return;
+			}
+			clearTimeout(poke);
+			poke = setTimeout(function () { if (window.htmx) window.htmx.trigger(document.body, 'chat:new'); }, 250);
+		};
+	}
+
+	function settle(e) {
+		if (!root()) return;
+		fit();
+		var el = e && e.detail && e.detail.elt;
+		if (!el || el.id === 'chat-log' || first) place();
+		filter();
+		badges();
+		applyTicks();
+		stream();
+	}
+	document.addEventListener('htmx:afterSettle', settle);
+	document.addEventListener('DOMContentLoaded', settle);
+	window.addEventListener('load', function () { first = true; settle(); });
 })();
 
 // A polled region keeps its open [data-open-key] details open across swaps.

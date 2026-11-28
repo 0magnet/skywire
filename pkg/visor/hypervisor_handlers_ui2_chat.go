@@ -3,10 +3,12 @@ package visor
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/skycoin/skywire/pkg/cipher"
@@ -23,17 +25,149 @@ import (
 func (hv *Hypervisor) ui2ChatRoutes(r *httputil.Router) {
 	r.Get("/visors/{pk}/chat", hv.ui2Chat(""))
 	r.Get("/visors/{pk}/chat/log", hv.ui2Chat("log"))
+	r.Get("/visors/{pk}/chat/avatar", hv.ui2ChatAvatar())
 	r.Post("/visors/{pk}/chat/send", hv.ui2Chat("send"))
 	r.Post("/visors/{pk}/chat/delete", hv.ui2Chat("delete"))
 	r.Get("/visors/{pk}/chat/groups/log", hv.ui2Chat("glog"))
 	r.Post("/visors/{pk}/chat/groups/send", hv.ui2Chat("gsend"))
 	r.Post("/visors/{pk}/chat/groups/create", hv.ui2Chat("gcreate"))
 	r.Post("/visors/{pk}/chat/groups/join", hv.ui2Chat("gjoin"))
+	r.Get("/visors/{pk}/chat/groups/info", hv.ui2Chat("ginfo"))
 	r.Get("/visors/{pk}/chat/groups/invite", hv.ui2Chat("ginvite"))
 	r.Post("/visors/{pk}/chat/groups/add-member", hv.ui2Chat("gadd"))
+	r.Post("/visors/{pk}/chat/groups/member", hv.ui2Chat("gmember"))
+	r.Post("/visors/{pk}/chat/groups/request", hv.ui2Chat("grequest"))
 	r.Post("/visors/{pk}/chat/groups/ask-again", hv.ui2Chat("gask"))
+	r.Post("/visors/{pk}/chat/groups/leave", hv.ui2Chat("gleave"))
+	r.Post("/visors/{pk}/chat/groups/delete", hv.ui2Chat("gdelete"))
 	r.Post("/visors/{pk}/chat/password", hv.ui2Chat("password"))
 	hv.ui2VoiceRoutes(r)
+}
+
+// ui2ChatState is what the chat tab keeps between requests: the peers'
+// profiles, fetched over the network at most once per ui2ChatProfileTTL, and
+// the ids of the messages a read receipt was already sent for.
+type ui2ChatState struct {
+	mu       sync.Mutex
+	profiles map[string]ui2ChatProfile
+	read     map[string]bool
+}
+
+type ui2ChatProfile struct {
+	p  visorapi.Profile
+	ok bool
+	at time.Time
+}
+
+const (
+	ui2ChatProfileTTL = 30 * time.Minute
+	// ui2ChatReadMax bounds the read receipt set, which restarts when full.
+	ui2ChatReadMax = 5000
+	// ui2ChatReadWindow is how old an inbound message may be and still get
+	// a read receipt when its conversation is opened.
+	ui2ChatReadWindow = 7 * 24 * time.Hour
+)
+
+// profileName is a cached profile name, without fetching.
+func (s *ui2ChatState) profileName(pk string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if e, ok := s.profiles[pk]; ok && e.ok {
+		return e.p.Name
+	}
+	return ""
+}
+
+// profile is pk's profile, fetched when the cache has none or it is stale.
+func (s *ui2ChatState) profile(api visorapi.API, pk cipher.PubKey) (visorapi.Profile, bool) {
+	s.mu.Lock()
+	e, ok := s.profiles[pk.Hex()]
+	s.mu.Unlock()
+	if ok && time.Since(e.at) < ui2ChatProfileTTL {
+		return e.p, e.ok
+	}
+	p, err := api.ProfileFetch(pk)
+	e = ui2ChatProfile{p: p, ok: err == nil, at: time.Now()}
+	s.mu.Lock()
+	if s.profiles == nil {
+		s.profiles = map[string]ui2ChatProfile{}
+	}
+	s.profiles[pk.Hex()] = e
+	s.mu.Unlock()
+	return e.p, e.ok
+}
+
+// unread picks the ids of inbound messages not yet acknowledged and marks
+// them as acknowledged.
+func (s *ui2ChatState) unread(ms []ui2.ChatMsg) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.read == nil || len(s.read) > ui2ChatReadMax {
+		s.read = map[string]bool{}
+	}
+	var ids []string
+	for _, m := range ms {
+		if m.Outgoing || m.ID == "" || m.Deleted || s.read[m.ID] || time.Since(m.TS) > ui2ChatReadWindow {
+			continue
+		}
+		s.read[m.ID] = true
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
+
+// ui2ChatAvatar serves a peer's profile picture, or 404 when it has none.
+func (hv *Hypervisor) ui2ChatAvatar() http.HandlerFunc {
+	return hv.withCtx(hv.ui2VisorCtx, func(w http.ResponseWriter, r *http.Request, ctx *httpCtx) {
+		var pk cipher.PubKey
+		if r.PathValue("pk") != hv.c.PK.Hex() || pk.Set(r.FormValue("pk")) != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "private, max-age=600")
+		p, ok := hv.chat.profile(ctx.API, pk)
+		mime, data, found := ui2ChatDataURI(p.Avatar)
+		if !ok || !found {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", mime)
+		_, _ = w.Write(data) //nolint:errcheck,gosec
+	})
+}
+
+// ui2ChatDataURI decodes a base64 image data URI.
+func ui2ChatDataURI(s string) (string, []byte, bool) {
+	head, body, ok := strings.Cut(strings.TrimPrefix(s, "data:"), ",")
+	if !ok || !strings.HasPrefix(s, "data:image/") || !strings.HasSuffix(head, ";base64") {
+		return "", nil, false
+	}
+	b, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return "", nil, false
+	}
+	return strings.TrimSuffix(head, ";base64"), b, true
+}
+
+// ui2ChatNames are the names the contact book and the cached profiles give
+// to keys. The contact book wins.
+func (hv *Hypervisor) ui2ChatNames(api visorapi.API, pks []string) map[string]string {
+	names := map[string]string{}
+	for _, pk := range pks {
+		if n := hv.chat.profileName(pk); n != "" {
+			names[pk] = n
+		}
+	}
+	if all, err := api.ContactsList(); err == nil {
+		for _, c := range all {
+			for _, k := range c.Keys {
+				if c.Name != "" {
+					names[k.Hex()] = c.Name
+				}
+			}
+		}
+	}
+	return names
 }
 
 // ui2SkychatCall runs one request against the local skychat app.
@@ -61,7 +195,7 @@ func (hv *Hypervisor) ui2SkychatCall(method, path, query string, body any) ([]by
 }
 
 // ui2ChatDM fills the direct message view for peer.
-func (hv *Hypervisor) ui2ChatDM(c ui2.Chat) ui2.Chat {
+func (hv *Hypervisor) ui2ChatDM(api visorapi.API, c ui2.Chat) ui2.Chat {
 	c.History = true
 	b, code, err := hv.ui2SkychatCall(http.MethodGet, "history", "limit=500", nil)
 	var ms []ui2.ChatMsg
@@ -75,11 +209,30 @@ func (hv *Hypervisor) ui2ChatDM(c ui2.Chat) ui2.Chat {
 			c.Err = err.Error()
 		}
 	}
-	return ui2.ChatOf(c, ms)
+	c = ui2.ChatOf(c, ms)
+	c.Names = hv.ui2ChatNames(api, c.Peers)
+	return c
+}
+
+// ui2ChatRead sends the read receipts of the open conversation's inbound
+// messages, as the Angular tab does for each message it shows.
+func (hv *Hypervisor) ui2ChatRead(c ui2.Chat) {
+	if c.Peer == "" {
+		return
+	}
+	ids := hv.chat.unread(c.Msgs)
+	if len(ids) == 0 {
+		return
+	}
+	go func() {
+		if _, _, err := hv.ui2SkychatCall(http.MethodPost, "read-receipt", "", map[string]any{"pk": c.Peer, "ids": ids}); err != nil {
+			hv.logger.WithError(err).Debug("chat read receipt")
+		}
+	}()
 }
 
 // ui2ChatRooms fills the room view for the selected room.
-func ui2ChatRooms(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
+func (hv *Hypervisor) ui2ChatRooms(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
 	gs, err := api.GroupList()
 	if err != nil {
 		c.Err = err.Error()
@@ -91,17 +244,49 @@ func ui2ChatRooms(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
 			c.Group = &gs[i]
 		}
 	}
-	if c.Group == nil {
-		return c
-	}
 	ms, err := api.GroupPoll(time.Time{})
 	if err != nil {
 		c.Err = err.Error()
 		return c
 	}
+	c.AllGMsgs = ms
+	var pks []string
 	for _, m := range ms {
-		if m.GroupID == group {
+		pks = append(pks, m.SenderPK.Hex())
+		if c.Group != nil && m.GroupID == group {
 			c.GMsgs = append(c.GMsgs, m)
+		}
+	}
+	if c.Group != nil {
+		for _, m := range c.Group.Members {
+			pks = append(pks, m.Hex())
+		}
+	}
+	c.Names = hv.ui2ChatNames(api, pks)
+	return c
+}
+
+// ui2ChatInfo fills the room panel: the rooms and, for its admins, the
+// open join requests.
+func (hv *Hypervisor) ui2ChatInfo(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
+	c = hv.ui2ChatRooms(api, c, group)
+	if c.Names == nil {
+		c.Names = map[string]string{}
+	}
+	if c.Moderator() {
+		rs, err := api.GroupJoinRequests(group)
+		if err != nil && c.Err == "" {
+			c.Err = err.Error()
+		}
+		for _, q := range rs {
+			if q.Status == skychatgroup.JoinStatusPending {
+				c.Requests = append(c.Requests, q)
+				if _, ok := c.Names[q.PK.Hex()]; !ok {
+					if n := hv.chat.profileName(q.PK.Hex()); n != "" {
+						c.Names[q.PK.Hex()] = n
+					}
+				}
+			}
 		}
 	}
 	return c
@@ -109,7 +294,7 @@ func ui2ChatRooms(api visorapi.API, c ui2.Chat, group string) ui2.Chat {
 
 func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 	return hv.withCtx(hv.ui2VisorCtx, func(w http.ResponseWriter, r *http.Request, ctx *httpCtx) {
-		c := ui2.Chat{PK: r.PathValue("pk"), Mode: r.FormValue("mode"), Peer: r.FormValue("peer")}
+		c := ui2.Chat{PK: r.PathValue("pk"), Mode: r.FormValue("mode"), Peer: r.FormValue("peer"), Compose: r.FormValue("new") != ""}
 		if c.PK != hv.c.PK.Hex() || hv.visor == nil {
 			c.Remote = true
 			hv.render(w, r, ui2.ChatPage(c))
@@ -123,21 +308,28 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 				c.Peer = ""
 			}
 			c.Voice = ui2VoiceState(ctx.API, ui2.Voice{PK: c.PK, Peer: c.Peer, CanCall: c.Mode != "groups"})
+			c.PwSet, _ = ctx.API.SkychatPasswordIsSet() //nolint:errcheck
 			if c.Mode == "groups" {
-				hv.render(w, r, ui2.ChatPage(ui2ChatRooms(ctx.API, c, group)))
+				hv.render(w, r, ui2.ChatPage(hv.ui2ChatRooms(ctx.API, c, group)))
 				return
 			}
-			c.PwSet, _ = ctx.API.SkychatPasswordIsSet() //nolint:errcheck
-			hv.render(w, r, ui2.ChatPage(hv.ui2ChatDM(c)))
+			c = hv.ui2ChatDM(ctx.API, c)
+			hv.ui2ChatRead(c)
+			hv.render(w, r, ui2.ChatPage(c))
 		case "log":
-			c = hv.ui2ChatDM(c)
+			c = hv.ui2ChatDM(ctx.API, c)
+			hv.ui2ChatRead(c)
 			hv.render(w, r, ui2.ChatLog(c), ui2.ChatPeers(c, true))
 		case "send", "delete":
 			var err error
 			if op == "send" {
 				c.Peer = strings.TrimSpace(r.FormValue("to"))
 				if err = pk.Set(c.Peer); err == nil {
-					body := map[string]any{"recipient": c.Peer, "message": r.FormValue("message"), "network": "auto"}
+					network := r.FormValue("network")
+					if network != "skynet" && network != "dmsg" {
+						network = "auto"
+					}
+					body := map[string]any{"recipient": c.Peer, "message": r.FormValue("message"), "network": network, "receipts": true}
 					if rt := r.FormValue("reply_to"); rt != "" {
 						body["reply_to"] = rt
 					}
@@ -146,54 +338,111 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 			} else {
 				_, _, err = hv.ui2SkychatCall(http.MethodPost, "delete", "", map[string]string{"pk": c.Peer, "id": r.FormValue("id")})
 			}
-			c = hv.ui2ChatDM(c)
+			if err == nil && op == "send" && r.FormValue("new") != "" {
+				w.Header().Set("HX-Redirect", ui2.VisorURL(c.PK, "chat")+"?mode=dm&peer="+c.Peer)
+				return
+			}
+			c = hv.ui2ChatDM(ctx.API, c)
 			if err != nil {
 				c.Err = err.Error()
 			}
 			hv.render(w, r, ui2.ChatLog(c), ui2.ChatPeers(c, true))
 		case "glog":
-			hv.render(w, r, ui2.ChatRoomLog(ui2ChatRooms(ctx.API, c, group)))
+			c.Mode = "groups"
+			c = hv.ui2ChatRooms(ctx.API, c, group)
+			hv.render(w, r, ui2.ChatRoomLog(c), ui2.ChatRooms(c, true))
 		case "gsend":
+			c.Mode = "groups"
 			err := ctx.API.GroupSend(visorapi.GroupSendArgs{ID: group, Text: r.FormValue("text")})
-			c = ui2ChatRooms(ctx.API, c, group)
+			c = hv.ui2ChatRooms(ctx.API, c, group)
 			if err != nil {
 				hv.render(w, r, ui2.ChatRoomLog(c), ui2.Toast(err.Error(), true))
 				return
 			}
-			hv.render(w, r, ui2.ChatRoomLog(c))
+			hv.render(w, r, ui2.ChatRoomLog(c), ui2.ChatRooms(c, true))
 		case "password":
 			hv.render(w, r, ui2.ChatPassword(hv.ui2ChatPassword(r, ctx, c)))
-		case "gcreate", "gjoin", "ginvite", "gadd", "gask":
+		case "gcreate", "gjoin", "gask", "gleave", "gdelete":
+			c.Mode = "groups"
 			var err error
+			var info visorapi.GroupInfo
 			switch op {
 			case "gcreate":
 				mode := skychatgroup.ModePublic
 				if r.FormValue("mode") == "private" {
 					mode = skychatgroup.ModePrivate
 				}
-				var info visorapi.GroupInfo
-				info, c.Invite, err = ctx.API.GroupCreate(visorapi.GroupCreateArgs{Name: strings.TrimSpace(r.FormValue("name")), Mode: mode})
-				group = info.ID
+				info, _, err = ctx.API.GroupCreate(visorapi.GroupCreateArgs{Name: strings.TrimSpace(r.FormValue("name")), Mode: mode})
 			case "gjoin":
-				var info visorapi.GroupInfo
 				info, err = ctx.API.GroupJoin(visorapi.GroupJoinArgs{Invite: strings.TrimSpace(r.FormValue("invite"))})
-				group = info.ID
 			case "gask":
-				_, err = ctx.API.GroupAskAgain(group)
-			case "ginvite":
-				c.Invite, err = ctx.API.GroupInvite(group)
-			case "gadd":
-				if err = pk.Set(strings.TrimSpace(r.FormValue("pk"))); err == nil {
+				info, err = ctx.API.GroupAskAgain(group)
+			case "gleave":
+				err = ctx.API.GroupLeave(group)
+			case "gdelete":
+				err = ctx.API.GroupDelete(group)
+			}
+			if err != nil {
+				c = hv.ui2ChatRooms(ctx.API, c, group)
+				hv.render(w, r, ui2.ChatRooms(c, false), ui2.Toast(err.Error(), true))
+				return
+			}
+			loc := ui2.VisorURL(c.PK, "chat") + "?mode=groups"
+			if info.ID != "" {
+				loc += "&group=" + info.ID
+			}
+			w.Header().Set("HX-Redirect", loc)
+		case "ginfo", "ginvite", "gadd", "gmember", "grequest":
+			c.Mode = "groups"
+			var err error
+			var invite string
+			if op != "ginfo" && op != "ginvite" {
+				err = pk.Set(strings.TrimSpace(r.FormValue("pk")))
+			}
+			if err == nil {
+				switch op {
+				case "ginvite":
+					invite, err = ctx.API.GroupInvite(group)
+				case "gadd":
 					_, err = ctx.API.GroupAddMember(group, pk)
+				case "gmember":
+					err = ui2ChatModerate(ctx.API, group, pk, r.FormValue("action"))
+				case "grequest":
+					if r.FormValue("action") == "approve" {
+						_, err = ctx.API.GroupApproveJoin(group, pk)
+					} else {
+						err = ctx.API.GroupDenyJoin(group, pk)
+					}
 				}
 			}
-			c = ui2ChatRooms(ctx.API, c, group)
+			c = hv.ui2ChatInfo(ctx.API, c, group)
+			c.Invite = invite
 			if err != nil {
 				c.Err = err.Error()
 			}
-			hv.render(w, r, ui2.ChatRooms(c, false))
+			hv.render(w, r, ui2.ChatRoomInfo(c))
 		}
 	})
+}
+
+// ui2ChatModerate runs one member action of the room panel.
+func ui2ChatModerate(api visorapi.API, group string, pk cipher.PubKey, action string) error {
+	var err error
+	switch action {
+	case "remove":
+		_, err = api.GroupRemoveMember(group, pk)
+	case "mute":
+		_, err = api.GroupMuteMember(group, pk)
+	case "unmute":
+		_, err = api.GroupUnmuteMember(group, pk)
+	case "promote":
+		_, err = api.GroupPromoteAdmin(group, pk)
+	case "demote":
+		_, err = api.GroupDemoteAdmin(group, pk)
+	default:
+		err = errors.New("unknown action " + action)
+	}
+	return err
 }
 
 // ui2ChatPassword sets or clears the skychat password with the Angular

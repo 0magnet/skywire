@@ -50,7 +50,7 @@ templ ChatVoice(v Voice) {
 					<button class="btn sm warn" type="button" hx-post={ v.url("/hangup") } hx-vals={ jsonVals(v.vals(map[string]string{"call_id": v.Call})) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.hangup-tip") }><span class="mi">call_end</span>{ T(ctx, "skychat.voice.hangup") }</button>
 				</div>
 			} else if v.CanCall && len(v.Dialing) == 0 {
-				<div class="voice-row">
+				<div class="voice-row idle">
 					if v.Peer != "" {
 						<button class="btn sm" type="button" hx-post={ v.url("/call") } hx-vals={ jsonVals(v.vals(nil)) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.call-tip") }><span class="mi">call</span>{ T(ctx, "skychat.voice.call") }</button>
 					} else {
