@@ -1514,6 +1514,9 @@ func (mc *mockRPCClient) GroupWait(_ time.Time, _ time.Duration) ([]GroupMessage
 // GroupDelete implements API.
 func (mc *mockRPCClient) GroupDelete(_ string) error { return nil }
 
+// GroupForget implements API.
+func (mc *mockRPCClient) GroupForget(_ string) error { return nil }
+
 // GroupLeave implements API.
 func (mc *mockRPCClient) GroupLeave(_ string) error { return nil }
 

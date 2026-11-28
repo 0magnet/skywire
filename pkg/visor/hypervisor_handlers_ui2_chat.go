@@ -40,6 +40,8 @@ func (hv *Hypervisor) ui2ChatRoutes(r *httputil.Router) {
 	r.Post("/visors/{pk}/chat/groups/ask-again", hv.ui2Chat("gask"))
 	r.Post("/visors/{pk}/chat/groups/leave", hv.ui2Chat("gleave"))
 	r.Post("/visors/{pk}/chat/groups/delete", hv.ui2Chat("gdelete"))
+	r.Post("/visors/{pk}/chat/groups/forget", hv.ui2Chat("gforget"))
+	r.Post("/visors/{pk}/chat/forget", hv.ui2Chat("forget"))
 	r.Post("/visors/{pk}/chat/password", hv.ui2Chat("password"))
 	r.Post("/visors/{pk}/chat/notify", hv.ui2Chat("notify"))
 	hv.ui2VoiceRoutes(r)
@@ -297,7 +299,7 @@ func (hv *Hypervisor) ui2ChatInfo(api visorapi.API, c ui2.Chat, group string) ui
 
 func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 	return hv.withCtx(hv.ui2VisorCtx, func(w http.ResponseWriter, r *http.Request, ctx *httpCtx) {
-		c := ui2.Chat{PK: r.PathValue("pk"), Mode: r.FormValue("mode"), Peer: r.FormValue("peer"), Compose: r.FormValue("new") != ""}
+		c := ui2.Chat{PK: r.PathValue("pk"), Mode: r.FormValue("mode"), Peer: r.FormValue("peer"), Compose: r.FormValue("new") != "", ShowEnded: r.FormValue("ended") != ""}
 		if c.PK != hv.c.PK.Hex() || hv.visor == nil {
 			c.Remote = true
 			hv.render(w, r, ui2.ChatPage(c))
@@ -373,7 +375,14 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 			hv.ui2ChatNotifySet(w, r, c)
 		case "password":
 			hv.render(w, r, ui2.ChatPassword(hv.ui2ChatPassword(r, ctx, c)))
-		case "gcreate", "gjoin", "gask", "gleave", "gdelete":
+		case "forget":
+			_, _, err := hv.ui2SkychatCall(http.MethodPost, "history/forget", "", map[string]any{"pk": c.Peer, "all": true})
+			if err != nil {
+				hv.render(w, r, ui2.Toast(err.Error(), true))
+				return
+			}
+			w.Header().Set("HX-Redirect", ui2.VisorURL(c.PK, "chat")+"?mode=dm")
+		case "gcreate", "gjoin", "gask", "gleave", "gdelete", "gforget":
 			c.Mode = "groups"
 			var err error
 			var info visorapi.GroupInfo
@@ -392,6 +401,8 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 				err = ctx.API.GroupLeave(group)
 			case "gdelete":
 				err = ctx.API.GroupDelete(group)
+			case "gforget":
+				err = ctx.API.GroupForget(group)
 			}
 			if err != nil {
 				c = hv.ui2ChatRooms(ctx.API, c, group)

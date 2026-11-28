@@ -887,6 +887,27 @@ func (v *Visor) GroupLeave(id string) error {
 	return nil
 }
 
+// GroupForget drops a group this visor left or deleted: its record, CXO data
+// and stored history, so it no longer lists and does not come back at startup.
+func (v *Visor) GroupForget(id string) error {
+	mgr := v.groupManager()
+	if mgr == nil {
+		return ErrGroupingDisabled
+	}
+	if err := mgr.Forget(id); err != nil {
+		return err
+	}
+	v.initLock.RLock()
+	hist := v.grouping.history
+	v.initLock.RUnlock()
+	if hist != nil {
+		if _, err := hist.DeleteGroup(id); err != nil {
+			v.log.WithError(err).WithField("group", id).Warn("grouping: dropping history of a forgotten group failed")
+		}
+	}
+	return nil
+}
+
 // groupHistoryPurge drops the stored history of a group that has ended.
 func (v *Visor) groupHistoryPurge(id string) {
 	v.initLock.RLock()

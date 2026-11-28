@@ -132,3 +132,25 @@ func TestChatGroupReply(t *testing.T) {
 	require.Contains(t, out, "Unmute notifications for this chat")
 	require.Contains(t, out, `data-reply-preview`)
 }
+
+func TestChatEndedRooms(t *testing.T) {
+	pk, _ := cipher.GenerateKeyPair()
+	c := Chat{PK: pk.Hex(), Mode: "groups", Groups: []visorapi.GroupInfo{
+		{ID: "live", Name: "live", Status: "active", Role: "member"},
+		{ID: "gone", Name: "gone", Status: "left", Role: "member"},
+	}}
+	require.Len(t, c.RoomRows(), 1, "a left room is hidden")
+	require.Equal(t, 1, c.EndedCount())
+	require.Contains(t, renderEN(t, ChatRooms(c, false)), "Show 1 left or deleted rooms")
+	c.ShowEnded = true
+	require.Len(t, c.RoomRows(), 2)
+
+	c.ShowEnded = false
+	c.Group = &c.Groups[1]
+	require.Len(t, c.RoomRows(), 2, "the open room lists even when it ended")
+	out := renderEN(t, ChatPage(c))
+	require.Contains(t, out, "Forget room")
+	require.Contains(t, out, "You are no longer in this room.")
+	c.Group = &c.Groups[0]
+	require.Contains(t, renderEN(t, ChatPage(c)), "Leave room")
+}

@@ -88,6 +88,9 @@ type Chat struct {
 	// Notify is the skychat notification settings, nil on a skychat without them.
 	Notify *ChatNotify
 
+	// ShowEnded lists the rooms this visor left or deleted.
+	ShowEnded bool
+
 	// Requests are the open join requests of Group, for its admins.
 	Requests []visorapi.GroupJoinRequest
 }
@@ -318,7 +321,10 @@ func (c Chat) RoomRows() []ChatRow {
 	idx := map[string]int{}
 	for i := range c.Groups {
 		g := &c.Groups[i]
-		r := ChatRow{ID: g.ID, Href: c.url("?mode=groups&group=" + g.ID), Name: g.Name, Group: g,
+		if ChatGroupEnded(string(g.Status)) && !c.ShowEnded && (c.Group == nil || c.Group.ID != g.ID) {
+			continue
+		}
+		r := ChatRow{ID: g.ID, Href: c.url("?mode=groups&group=" + g.ID + c.endedQuery()), Name: g.Name, Group: g,
 			Active: c.Group != nil && c.Group.ID == g.ID, Time: g.LastMessageAt}
 		if strings.HasPrefix(g.Avatar, "data:image/") {
 			r.Avatar = g.Avatar
@@ -657,4 +663,32 @@ func groupText(s string) string {
 		return r.Text
 	}
 	return s
+}
+
+// ChatGroupEnded is whether a room's status means this visor is out of it
+// for good: left, deleted, banned or removed. Such a room can be forgotten.
+func ChatGroupEnded(status string) bool {
+	switch status {
+	case "left", "revoked", "banned", "removed":
+		return true
+	}
+	return false
+}
+
+// EndedCount is how many rooms the list hides as ended.
+func (c Chat) EndedCount() int {
+	n := 0
+	for _, g := range c.Groups {
+		if ChatGroupEnded(string(g.Status)) {
+			n++
+		}
+	}
+	return n
+}
+
+func (c Chat) endedQuery() string {
+	if c.ShowEnded {
+		return "&ended=1"
+	}
+	return ""
 }

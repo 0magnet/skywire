@@ -1017,6 +1017,10 @@ func (proxyDefaultAPI) GroupLeave(_ string) error {
 	return ErrProxyNotSupported
 }
 
+func (proxyDefaultAPI) GroupForget(_ string) error {
+	return ErrProxyNotSupported
+}
+
 // VoiceCall implements API (not proxied).
 func (proxyDefaultAPI) VoiceCall(_ cipher.PubKey) (string, error) {
 	return "", ErrProxyNotSupported

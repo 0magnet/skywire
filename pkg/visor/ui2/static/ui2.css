@@ -672,3 +672,9 @@ fieldset.choice legend { padding: 0; margin-bottom: 4px; }
 .ov-card.chart svg { width: 100%; height: 48px; display: block; color: var(--accent); }
 .chart-now { font-weight: 600; color: rgba(var(--fg), 0.9); }
 .vh-chart { width: 100%; height: 160px; display: block; }
+.tg-ended { display: flex; align-items: center; gap: 6px; margin: 8px 10px; font-size: 0.85em; color: rgba(var(--fg), 0.65); text-decoration: none; }
+.tg-ended:hover { color: var(--accent); }
+.tg-menu { width: 220px; padding: 6px; gap: 2px; }
+.tg-menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tg-menu-item:hover { background: rgba(var(--fg), 0.08); }
+.tg-menu-item.warn { color: rgb(var(--rose)); }

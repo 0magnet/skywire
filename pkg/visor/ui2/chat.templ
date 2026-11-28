@@ -61,6 +61,7 @@ templ chatDirectMain(c Chat) {
 					<div class="tg-sub mono" data-copy={ c.Peer } title={ T(ctx, "nodes.copy-key") }>{ c.Peer }</div>
 				</div>
 				@ChatMute(c, c.Peer)
+				<button class="icon-btn" type="button" hx-post={ c.url("/forget") } hx-vals={ jsonVals(map[string]string{"peer": c.Peer}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.delete-chat-confirm") } title={ T(ctx, "ui2.chat.delete-chat") } aria-label={ T(ctx, "ui2.chat.delete-chat") }><span class="mi">delete_sweep</span></button>
 				if !c.Voice.Off {
 					<button class="icon-btn" type="button" hx-post={ c.Voice.url("/call") } hx-vals={ jsonVals(c.Voice.vals(nil)) } hx-target="#chat-voice" hx-swap="outerHTML" title={ T(ctx, "skychat.voice.call-tip") } aria-label={ T(ctx, "skychat.voice.call") }><span class="mi">call</span></button>
 				}
@@ -282,6 +283,13 @@ templ ChatRooms(c Chat, oob bool) {
 				@chatRow(c, r)
 			}
 		}
+		if n := c.EndedCount(); n > 0 {
+			if c.ShowEnded {
+				<a class="tg-ended" href={ templ.URL(c.url("?mode=groups")) }><span class="mi">visibility_off</span>{ T(ctx, "ui2.chat.hide-ended") }</a>
+			} else {
+				<a class="tg-ended" href={ templ.URL(c.url("?mode=groups&ended=1")) }><span class="mi">history</span>{ T(ctx, "ui2.chat.show-ended", "count", itoa(n)) }</a>
+			}
+		}
 	</nav>
 }
 
@@ -327,6 +335,7 @@ templ chatRoomMain(c Chat) {
 				@ChatMute(c, c.Group.ID)
 				<button class="icon-btn" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "skychat.invite") } aria-label={ T(ctx, "skychat.invite") }><span class="mi">link</span></button>
 				<button class="icon-btn" type="button" hx-get={ c.url("/groups/info?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.info") } aria-label={ T(ctx, "ui2.chat.info") }><span class="mi">info</span></button>
+				@chatRoomMenu(c)
 			</header>
 			@ChatVoice(c.Voice)
 			<div class="tg-thread">
@@ -341,6 +350,12 @@ templ chatRoomMain(c Chat) {
 					<div class="tg-compose tg-blocked">
 						<span>{ T(ctx, "ui2.chat.declined-help") }</span>
 						<button class="btn sm" type="button" hx-post={ c.url("/groups/ask-again") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" title={ T(ctx, "skychat.ask-again-tip") }>{ T(ctx, "skychat.ask-again") }</button>
+						@chatForgetButton(c)
+					</div>
+				case "left", "revoked", "banned", "removed":
+					<div class="tg-compose tg-blocked">
+						<span>{ T(ctx, "ui2.chat.ended") }</span>
+						@chatForgetButton(c)
 					</div>
 				default:
 					if !c.Group.CanPost && c.Group.CannotPostReason != "" {
@@ -367,7 +382,7 @@ templ ChatRoomLog(c Chat) {
 	if c.Group == nil {
 		<div id="chat-log" class="tg-log"><div class="tg-log-inner"><p class="tg-note">{ T(ctx, "skychat.rooms-pick") }</p></div></div>
 	} else {
-		<div id="chat-log" class="tg-log" hx-get={ c.url("/groups/log?group=" + c.Group.ID) } hx-trigger="every 3s [document.visibilityState === 'visible']" hx-swap="outerHTML" data-chat-log>
+		<div id="chat-log" class="tg-log" hx-get={ c.url("/groups/log?group=" + c.Group.ID + c.endedQuery()) } hx-trigger="every 3s [document.visibilityState === 'visible']" hx-swap="outerHTML" data-chat-log>
 			<div class="tg-log-inner">
 				if len(c.GMsgs) == 0 {
 					<p class="tg-note">{ T(ctx, "skychat.empty") }</p>
@@ -527,4 +542,26 @@ templ ChatMute(c Chat, key string) {
 			<button id="chat-mute" class="icon-btn" type="button" hx-post={ c.url("/notify") } hx-vals={ jsonVals(map[string]string{"key": key, "muted": "1", "mode": chatMode(c)}) } hx-target="#chat-mute" hx-swap="outerHTML" title={ T(ctx, "ui2.chat.mute-chat") } aria-label={ T(ctx, "ui2.chat.mute-chat") }><span class="mi">volume_up</span></button>
 		}
 	}
+}
+
+// chatForgetButton drops a room this visor is out of from the list for good.
+templ chatForgetButton(c Chat) {
+	<button class="btn sm" type="button" hx-post={ c.url("/groups/forget") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.forget-confirm") } title={ T(ctx, "ui2.chat.forget-help") }><span class="mi">delete_forever</span>{ T(ctx, "ui2.chat.forget") }</button>
+}
+
+// chatRoomMenu is the room header's menu: leave or delete the room, or
+// forget it once this visor is out.
+templ chatRoomMenu(c Chat) {
+	<details class="tg-pop right">
+		<summary class="icon-btn" title={ T(ctx, "ui2.chat.more") } aria-label={ T(ctx, "ui2.chat.more") }><span class="mi">more_vert</span></summary>
+		<div class="tg-pop-body tg-menu">
+			if ChatGroupEnded(string(c.Group.Status)) || string(c.Group.Status) == "denied" {
+				<button class="tg-menu-item" type="button" hx-post={ c.url("/groups/forget") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.forget-confirm") }><span class="mi">delete_forever</span>{ T(ctx, "ui2.chat.forget") }</button>
+			} else if c.Owner() {
+				<button class="tg-menu-item warn" type="button" hx-post={ c.url("/groups/delete") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.delete-group-confirm") }><span class="mi">delete</span>{ T(ctx, "ui2.chat.delete-group") }</button>
+			} else {
+				<button class="tg-menu-item warn" type="button" hx-post={ c.url("/groups/leave") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID}) } hx-swap="none" hx-confirm={ T(ctx, "ui2.chat.leave-confirm") }><span class="mi">logout</span>{ T(ctx, "ui2.chat.leave") }</button>
+			}
+		</div>
+	</details>
 }
