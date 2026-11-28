@@ -8,6 +8,7 @@ updates may be generated with `scripts/changelog.sh <PR#lowest> <PR#highest>`
 
 ## Unreleased
 
+-   skychat, cli: `skywire cli skychat channel` serves skychat groups and DMs to Claude Code as a channel, with reply, history and groups tools, over the local visor or `--via`; skychat answers `/events?wait=` as one JSON batch for clients that reach it through the visor  [#6358](https://github.com/skycoin/skywire/pull/6358)
 -   skychat, cli: add `skywire cli skychat bridge telegram` to relay a skychat group to and from a Telegram chat
 
 ## 1.3.114

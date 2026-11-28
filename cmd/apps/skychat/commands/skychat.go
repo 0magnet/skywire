@@ -1516,6 +1516,10 @@ func sseHandler(w http.ResponseWriter, req *http.Request) {
 //	dm+group+pair; "system" is opt-in). since: resume after this seq (replay
 //	buffered events with seq>since within the 24h window, then live-follow).
 func eventsHandler(w http.ResponseWriter, req *http.Request) {
+	if v := req.URL.Query().Get("wait"); v != "" {
+		eventsWaitServe(w, req, v)
+		return
+	}
 	f, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "Streaming unsupported!", http.StatusBadRequest)

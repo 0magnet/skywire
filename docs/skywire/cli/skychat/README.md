@@ -13,6 +13,7 @@ skywire cli skychat
 ## Subcommands
 
 - [alias](alias/README.md) — Manage local PK aliases
+- [channel](channel/README.md) — Serve skychat to Claude Code as a channel (MCP on stdio)
 - [chat](chat/README.md) — Interactive chat TUI (split pane)
 - [events](events/README.md) — Stream structured chat events (NDJSON) from the chat app
 - [group](group/README.md) — D1 owner-centric group chat over CXO feeds

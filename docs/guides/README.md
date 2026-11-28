@@ -41,6 +41,7 @@ cobra subcommand tree.
 - [resolving-proxy.md](resolving-proxy.md) — the `.dmsg` / `.skynet` resolving SOCKS5 proxies (`skywire cli resolver`): reach visors and deployment services by public key over dmsg/skynet from a browser or `curl` — the supported way to view deployment-service data now that the CLI has no plain-HTTP fallback
 - [dmsg-lan-gateway.md](dmsg-lan-gateway.md) — turn one board with a visor into a `.dmsg` / `.skynet` gateway for your whole LAN (OpenWRT / DD-WRT), so any device reaches dmsg-only deployment services with no per-device skywire install (via `skywire autoconfig --dmsgweb-addr`)
 - [standalone-skychat.md](standalone-skychat.md) — `skywire app skychat --standalone --tcp-listen :PORT` for visor-independent chat-app with direct-TCP entry point; port-forwarding caveats
+- [skychat-claude-channel.md](skychat-claude-channel.md) — `skywire cli skychat channel`, skychat groups and DMs pushed into a Claude Code session, answered through MCP tools
 - [standalone-dmsgpty-host.md](standalone-dmsgpty-host.md) — `skywire dmsg pty host --tcplisten :PORT` for visor-independent pty server with DMSG + TCP modes; port-forwarding caveats
 
 ## CLI & network operations

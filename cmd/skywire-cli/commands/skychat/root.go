@@ -59,7 +59,9 @@ func init() {
 		historyCmd,
 		statusCmd,
 		aliasCmd,
+		channelCmd,
 	)
+	channelFlagsSetup()
 
 	sendCmd.Flags().StringVarP(&recipient, "to", "t", "", "recipient public key (optional when --via tcp://<pk>@host:port is set — the PK in --via is used)")
 	sendCmd.Flags().StringVarP(&message, "msg", "m", "", "message to send (required)")
