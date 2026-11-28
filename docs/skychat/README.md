@@ -96,6 +96,7 @@ testing, useless for durable whitelists.
 | `cli skychat alias add\|ls\|rm` | local PK aliases |
 | `cli skychat group create\|invite\|join\|send\|listen\|history\|list\|info\|add\|promote\|demote\|leave\|delete` | group chat |
 | `cli skychat pair add\|accept\|decline\|send\|poll\|list\|remove` | pairing (poll, no SSE) |
+| `cli skychat bridge telegram --chat <id> --group <id> [--systemd]` | relay a group to a Telegram chat, token from `TG_BRIDGE_TOKEN` |
 
 ### `skywire app skychat` — the server
 One command, mode chosen by flags: `--standalone`, `--dmsg`/`--skynet`,

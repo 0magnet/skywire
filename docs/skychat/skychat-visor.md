@@ -71,6 +71,46 @@ skywire cli skychat group promote|demote|leave|add|delete …
 `--mode private` encrypts feed messages with an AES key shipped inside the
 invite link. The owner holds the roster; `promote`/`demote` manage admins.
 
+## Telegram bridge (`cli skychat bridge telegram`)
+
+Relays one group to one Telegram chat and back. Run it next to a visor
+that is a member of the group, normally the group's host. It uses the
+same visor RPC as `group send` and `group listen`, and the Telegram Bot
+API by long polling.
+
+- Telegram to the group: `[TG] name: text`. A reply carries a short quote,
+  `[TG] Ann (reply to Bob: first 40 characters…): text`. Photos, files,
+  stickers and voice notes become a note such as `[TG] Ann: [photo] caption`.
+  Bot commands (text starting with `/`) are not relayed.
+- The group to Telegram: `[skychat] name: text`, where name is the
+  sender's profile name or a short key. The logs carry the full key. The
+  bridge's own `[TG]` posts are not sent back.
+- Telegram allows about 20 messages a minute in a group, so lines are
+  spaced by `--telegram-interval` (3s) and lines waiting meanwhile are
+  joined into one message. Past `--queue-limit` lines the oldest are
+  dropped and the drop is logged.
+- The state file keeps the Telegram offset, the newest group message seen
+  and any lines not yet delivered, so a restart neither reposts nor skips.
+
+The bot needs privacy mode off (BotFather `/setprivacy`) or admin rights,
+or Telegram only shows it commands. The token is read from
+`TG_BRIDGE_TOKEN` or from `--env-file`, never from a flag. `--chat`,
+`--group` and `--state` default to `TG_BRIDGE_CHAT`, `TG_BRIDGE_GROUP`
+and `TG_BRIDGE_STATE`.
+
+```bash
+TG_BRIDGE_TOKEN=<token> skywire cli skychat bridge telegram --chat -1001381034109 --group <group-id> --state ./bridge.json
+```
+
+To run it as a service, keep the token in a root only file and print a
+unit:
+
+```bash
+install -m 600 /dev/null /etc/skywire/telegram-bridge.env   # then add TG_BRIDGE_TOKEN=<token>
+skywire cli skychat bridge telegram --systemd --chat -1001381034109 --group <group-id> > /etc/systemd/system/skychat-telegram-bridge.service
+systemctl daemon-reload && systemctl enable --now skychat-telegram-bridge
+```
+
 ## Pairing (`cli skychat pair`)
 
 A two-key handshake with per-partner CXO pair feeds (needs the app started

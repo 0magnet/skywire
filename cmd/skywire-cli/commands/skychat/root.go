@@ -49,8 +49,10 @@ var (
 func init() {
 	RootCmd.PersistentFlags().StringVar(&httpAddr, "addr", "127.0.0.1:8001", "skychat HTTP address")
 
+	bridgeTelegramFlags()
 	RootCmd.AddCommand(
 		sendCmd,
+		bridgeCmd,
 		listenCmd,
 		eventsCmd,
 		chatCmd,

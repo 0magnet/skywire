@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 updates may be generated with `scripts/changelog.sh <PR#lowest> <PR#highest>`
 
+## Unreleased
+
+-   skychat, cli: add `skywire cli skychat bridge telegram` to relay a skychat group to and from a Telegram chat
+
 ## 1.3.114
 
 Visors now put the IP address a dmsg server signed for them in the reward
