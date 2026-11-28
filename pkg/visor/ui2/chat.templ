@@ -224,7 +224,7 @@ templ chatBubble(c Chat, l ChatLine) {
 		}
 		<div class="tg-bubble">
 			if c.Mode == "groups" && !l.Out && l.First {
-				@chatName(c.NameOf(l.From), l.From, "tg-from "+chatHue(l.From))
+				@chatSender(c.NameOf(l.From), l.From, chatHue(l.From))
 			}
 			if l.Forwarded {
 				<div class="tg-fwd"><span class="mi">forward</span>{ T(ctx, "ui2.chat.forwarded") }</div>
@@ -351,7 +351,7 @@ templ chatRoomMain(c Chat) {
 				@chatAvatar(c.Group.ID, c.Group.Name, chatGroupAvatar(c), "sm")
 				<button class="tg-head-text tg-head-btn" type="button" hx-get={ c.url("/groups/info?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML">
 					<span class="tg-title">{ c.Group.Name }</span>
-					<span class="tg-sub">{ chatGroupTerm(ctx, string(c.Group.Mode)) } · { itoa(len(c.Group.Members)) } { T(ctx, "skychat.members") } · { chatGroupTerm(ctx, string(c.Group.Role)) }</span>
+					<span class="tg-sub">{ chatGroupTerm(ctx, string(c.Group.Mode)) } · { itoa(len(c.Group.Members)) } { T(ctx, "skychat.members") } · { chatGroupTerm(ctx, c.MyRole()) }</span>
 				</button>
 				@ChatMute(c, c.Group.ID)
 				<button class="icon-btn" type="button" hx-get={ c.url("/groups/invite?group=" + c.Group.ID) } hx-target="#chat-info" hx-swap="outerHTML" title={ T(ctx, "skychat.invite") } aria-label={ T(ctx, "skychat.invite") }><span class="mi">link</span></button>
@@ -693,4 +693,14 @@ templ chatRoomSettings(c Chat) {
 			<button class="btn sm" type="button" hx-post={ c.url("/groups/settings") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "action": "rotate"}) } hx-target="#chat-info" hx-swap="outerHTML" hx-confirm={ T(ctx, "ui2.chat.rotate-confirm") }><span class="mi">key</span>{ T(ctx, "ui2.chat.rotate") }</button>
 		}
 	</div>
+}
+
+// chatSender labels a room bubble: the sender's name, or the start and end
+// of the key, with the whole key on hover.
+templ chatSender(name, pk, hue string) {
+	if name != "" {
+		<div class={ "tg-from", hue } title={ pk }>{ name }</div>
+	} else {
+		<div class={ "tg-from", "mono", hue } title={ pk } data-label-for={ pk }>{ chatShortKey(pk) }</div>
+	}
 }
