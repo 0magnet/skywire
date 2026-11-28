@@ -44,6 +44,8 @@ func (a *ui2FakeAPI) SkychatPasswordIsSet() (bool, error) { return false, nil }
 
 func (a *ui2FakeAPI) ContactsList() ([]contacts.Contact, error) { return nil, nil }
 
+func (a *ui2FakeAPI) ProfileGet() (visorapi.Profile, error) { return visorapi.Profile{}, ErrGroupingDisabled }
+
 func (a *ui2FakeAPI) VoiceActive() ([]string, error) { return nil, ErrVoiceDisabled }
 
 func (a *ui2FakeAPI) RuntimeLogsSince(since int64) (visorapi.RuntimeLogsDelta, error) {

@@ -7,11 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/skycoin/skywire/pkg/cipher"
+	"github.com/skycoin/skywire/pkg/contacts"
 	"github.com/skycoin/skywire/pkg/httputil"
 	skychatgroup "github.com/skycoin/skywire/pkg/skychat/group"
 	"github.com/skycoin/skywire/pkg/visor/ui2"
@@ -42,6 +45,13 @@ func (hv *Hypervisor) ui2ChatRoutes(r *httputil.Router) {
 	r.Post("/visors/{pk}/chat/groups/delete", hv.ui2Chat("gdelete"))
 	r.Post("/visors/{pk}/chat/groups/forget", hv.ui2Chat("gforget"))
 	r.Post("/visors/{pk}/chat/forget", hv.ui2Chat("forget"))
+	r.Post("/visors/{pk}/chat/forget-message", hv.ui2Chat("forgetmsg"))
+	r.Get("/visors/{pk}/chat/search", hv.ui2Chat("search"))
+	r.Post("/visors/{pk}/chat/privacy", hv.ui2Chat("privacy"))
+	r.Post("/visors/{pk}/chat/profile", hv.ui2Chat("profile"))
+	r.Post("/visors/{pk}/chat/contact", hv.ui2Chat("contact"))
+	r.Post("/visors/{pk}/chat/groups/unsend", hv.ui2Chat("gunsend"))
+	r.Post("/visors/{pk}/chat/groups/settings", hv.ui2Chat("gsettings"))
 	r.Post("/visors/{pk}/chat/password", hv.ui2Chat("password"))
 	r.Post("/visors/{pk}/chat/notify", hv.ui2Chat("notify"))
 	hv.ui2VoiceRoutes(r)
@@ -215,6 +225,7 @@ func (hv *Hypervisor) ui2ChatDM(api visorapi.API, c ui2.Chat) ui2.Chat {
 	c = ui2.ChatOf(c, ms)
 	c.Names = hv.ui2ChatNames(api, c.Peers)
 	c.Notify = hv.ui2ChatNotify()
+	c.Privacy = hv.ui2ChatPrivacy()
 	return c
 }
 
@@ -314,6 +325,10 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 			}
 			c.Voice = ui2VoiceState(ctx.API, ui2.Voice{PK: c.PK, Peer: c.Peer, CanCall: c.Mode != "groups"})
 			c.PwSet, _ = ctx.API.SkychatPasswordIsSet() //nolint:errcheck
+			c.Privacy = hv.ui2ChatPrivacy()
+			if p, err := ctx.API.ProfileGet(); err == nil {
+				c.Profile = &p
+			}
 			if c.Mode == "groups" {
 				hv.render(w, r, ui2.ChatPage(hv.ui2ChatRooms(ctx.API, c, group)))
 				return
@@ -375,6 +390,8 @@ func (hv *Hypervisor) ui2Chat(op string) http.HandlerFunc {
 			hv.ui2ChatNotifySet(w, r, c)
 		case "password":
 			hv.render(w, r, ui2.ChatPassword(hv.ui2ChatPassword(r, ctx, c)))
+		case "forgetmsg", "search", "privacy", "profile", "contact", "gunsend", "gsettings":
+			hv.ui2ChatMore(w, r, ctx, c, op)
 		case "forget":
 			_, _, err := hv.ui2SkychatCall(http.MethodPost, "history/forget", "", map[string]any{"pk": c.Peer, "all": true})
 			if err != nil {
@@ -531,4 +548,159 @@ func (hv *Hypervisor) ui2ChatNotifySet(w http.ResponseWriter, r *http.Request, c
 		return
 	}
 	hv.render(w, r, out)
+}
+
+// ui2ChatPrivacy reads skychat's /privacy, nil on a skychat without it.
+func (hv *Hypervisor) ui2ChatPrivacy() *ui2.ChatPrivacy {
+	b, _, err := hv.ui2SkychatCall(http.MethodGet, "privacy", "", nil)
+	if err != nil {
+		return nil
+	}
+	var p ui2.ChatPrivacy
+	if json.Unmarshal(b, &p) != nil {
+		return nil
+	}
+	return &p
+}
+
+// ui2ChatMore runs the actions the skychat app's own page has: delete a
+// message for this visor only, search, message requests and blocking, the
+// profile name, adding a contact, deleting a room message for everyone and
+// a room's settings.
+func (hv *Hypervisor) ui2ChatMore(w http.ResponseWriter, r *http.Request, ctx *httpCtx, c ui2.Chat, op string) {
+	group := r.FormValue("group")
+	reload := func() {
+		w.Header().Set("HX-Refresh", "true")
+	}
+	switch op {
+	case "forgetmsg":
+		_, _, err := hv.ui2SkychatCall(http.MethodPost, "history/forget", "", map[string]string{"pk": c.Peer, "id": r.FormValue("id")})
+		c = hv.ui2ChatDM(ctx.API, c)
+		if err != nil {
+			c.Err = err.Error()
+		}
+		hv.render(w, r, ui2.ChatLog(c), ui2.ChatPeers(c, true))
+	case "search":
+		c.Query = strings.TrimSpace(r.FormValue("q"))
+		if c.Query != "" {
+			b, _, err := hv.ui2SkychatCall(http.MethodGet, "search", "q="+url.QueryEscape(c.Query), nil)
+			if err == nil {
+				_ = json.Unmarshal(b, &c.Hits) //nolint:errcheck
+			}
+			if gs, err := ctx.API.GroupList(); err == nil {
+				c.Groups = gs
+			}
+			var pks []string
+			for _, h := range c.Hits {
+				pks = append(pks, h.Peer)
+			}
+			c.Names = hv.ui2ChatNames(ctx.API, pks)
+		}
+		hv.render(w, r, ui2.ChatHits(c))
+	case "privacy":
+		var path string
+		var body map[string]any
+		switch a := r.FormValue("action"); a {
+		case "accept":
+			path, body = "privacy/accept", map[string]any{"pk": r.FormValue("pk")}
+		case "block", "unblock":
+			path, body = "privacy/block", map[string]any{"pk": r.FormValue("pk"), "blocked": a == "block"}
+		case "approval-on", "approval-off":
+			path, body = "privacy", map[string]any{"approval": a == "approval-on"}
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		_, _, err := hv.ui2SkychatCall(http.MethodPost, path, "", body)
+		if err != nil {
+			hv.render(w, r, ui2.Toast(err.Error(), true))
+			return
+		}
+		if r.FormValue("peer") != "" {
+			reload()
+			return
+		}
+		hv.ui2ChatSettingsRender(w, r, ctx, c)
+	case "profile":
+		p, err := ctx.API.ProfileGet()
+		if err == nil {
+			args := visorapi.ProfileSetArgs{Name: strings.TrimSpace(r.FormValue("name")), Avatar: p.Avatar}
+			if r.FormValue("clear_avatar") != "" {
+				args.Avatar = ""
+			}
+			_, err = ctx.API.ProfileSet(args)
+		}
+		if err != nil {
+			hv.render(w, r, ui2.Toast(err.Error(), true))
+			return
+		}
+		hv.ui2ChatSettingsRender(w, r, ctx, c)
+	case "contact":
+		var pk cipher.PubKey
+		name := strings.TrimSpace(r.Header.Get("HX-Prompt"))
+		err := pk.Set(r.FormValue("peer"))
+		if err == nil && name == "" {
+			err = errors.New(hv.ui2T(r, "ui2.chat.add-contact-prompt"))
+		}
+		if err == nil {
+			_, err = ctx.API.ContactsPut(contacts.Contact{Name: name, Keys: []cipher.PubKey{pk}})
+		}
+		if err != nil {
+			hv.render(w, r, ui2.Toast(err.Error(), true))
+			return
+		}
+		reload()
+	case "gunsend":
+		c.Mode = "groups"
+		ts, err := strconv.ParseInt(r.FormValue("ts"), 10, 64)
+		if err == nil {
+			var tomb string
+			if tomb, err = ui2.GroupDeleteBody(ts); err == nil {
+				err = ctx.API.GroupSend(visorapi.GroupSendArgs{ID: group, Text: tomb})
+			}
+			if err == nil {
+				if uerr := ctx.API.GroupUnsend(visorapi.GroupUnsendArgs{ID: group, TS: ts}); uerr != nil {
+					hv.logger.WithError(uerr).Debug("chat unsend: the tombstone still hides it")
+				}
+			}
+		}
+		c = hv.ui2ChatRooms(ctx.API, c, group)
+		if err != nil {
+			hv.render(w, r, ui2.ChatRoomLog(c), ui2.Toast(err.Error(), true))
+			return
+		}
+		hv.render(w, r, ui2.ChatRoomLog(c))
+	case "gsettings":
+		c.Mode = "groups"
+		on := r.FormValue("on") == "1"
+		var err error
+		switch r.FormValue("action") {
+		case "rename":
+			_, err = ctx.API.GroupSetMeta(visorapi.GroupSetMetaArgs{ID: group, Name: strings.TrimSpace(r.FormValue("name"))})
+		case "readonly":
+			_, err = ctx.API.GroupSetReadOnly(group, on)
+		case "listed":
+			_, err = ctx.API.GroupSetListed(group, on)
+		case "rotate":
+			_, err = ctx.API.GroupRotateKey(group)
+		default:
+			err = errors.New("unknown action")
+		}
+		c = hv.ui2ChatInfo(ctx.API, c, group)
+		if err != nil {
+			c.Err = err.Error()
+		}
+		hv.render(w, r, ui2.ChatRoomInfo(c))
+	}
+}
+
+func (hv *Hypervisor) ui2ChatSettingsRender(w http.ResponseWriter, r *http.Request, ctx *httpCtx, c ui2.Chat) {
+	c.Privacy = hv.ui2ChatPrivacy()
+	if p, err := ctx.API.ProfileGet(); err == nil {
+		c.Profile = &p
+	}
+	if c.Privacy != nil {
+		c.Names = hv.ui2ChatNames(ctx.API, c.Privacy.Blocked)
+	}
+	hv.render(w, r, ui2.ChatSettings(c))
 }

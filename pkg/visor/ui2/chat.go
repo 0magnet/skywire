@@ -7,6 +7,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"path"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -90,6 +91,14 @@ type Chat struct {
 
 	// ShowEnded lists the rooms this visor left or deleted.
 	ShowEnded bool
+
+	// Privacy is who may message this visor, nil on a skychat without it.
+	Privacy *ChatPrivacy
+	// Profile is this visor's own skychat profile, nil when grouping is off.
+	Profile *visorapi.Profile
+	// Query and Hits are a message search.
+	Query string
+	Hits  []ChatHit
 
 	// Requests are the open join requests of Group, for its admins.
 	Requests []visorapi.GroupJoinRequest
@@ -337,6 +346,9 @@ func (c Chat) RoomRows() []ChatRow {
 		rows = append(rows, r)
 	}
 	for _, m := range c.AllGMsgs {
+		if _, tomb := parseGroupDelete(m.Text); tomb {
+			continue
+		}
 		i, ok := idx[m.GroupID]
 		if !ok {
 			continue
@@ -378,6 +390,8 @@ type ChatLine struct {
 	Deleted   bool
 	Forwarded bool
 	File      ChatFile
+	// TSNano names a group message for delete for everyone.
+	TSNano int64
 
 	Day   string // set on the first line of a day
 	First bool   // first of a run from one sender
@@ -400,11 +414,28 @@ const chatRunGap = 10 * time.Minute
 func (c Chat) Lines(ctx context.Context, now time.Time) []ChatLine {
 	var ls []ChatLine
 	if c.Mode == "groups" {
+		gone := map[string]bool{}
 		for _, m := range c.GMsgs {
-			l := ChatLine{ID: GroupMsgID(m.SenderPK.Hex(), m.TS.Format(time.RFC3339Nano)), From: m.SenderPK.Hex(), Out: m.SenderPK.Hex() == c.PK, Text: m.Text, TS: m.TS}
-			if r, ok := ParseGroupReply(m.Text); ok {
+			if d, ok := parseGroupDelete(m.Text); ok {
+				gone[m.SenderPK.Hex()+"|"+strconv.FormatInt(d.ToTSNano, 10)] = true
+			}
+		}
+		for _, m := range c.GMsgs {
+			if _, tomb := parseGroupDelete(m.Text); tomb || gone[m.SenderPK.Hex()+"|"+strconv.FormatInt(m.TS.UnixNano(), 10)] {
+				continue
+			}
+			l := ChatLine{ID: GroupMsgID(m.SenderPK.Hex(), m.TS.Format(time.RFC3339Nano)), From: m.SenderPK.Hex(), Out: m.SenderPK.Hex() == c.PK, Text: m.Text, TS: m.TS, TSNano: m.TS.UnixNano()}
+			switch {
+			case isGroupReply(m.Text):
+				r, _ := ParseGroupReply(m.Text)
 				l.Text, l.Quote = r.Text, chatClip(r.ToPreview, 80)
 				l.ReplyTo = GroupMsgID(r.ToSender, r.ToTS)
+			case isGroupFile(m.Text):
+				f, _ := parseGroupFile(m.Text)
+				l.Text, l.File = "", ChatFile{Name: f.Name, Size: f.Size}
+			case isGroupForward(m.Text):
+				f, _ := parseGroupForward(m.Text)
+				l.Text, l.Forwarded = f.Text, true
 			}
 			ls = append(ls, l)
 		}
@@ -662,6 +693,12 @@ func groupText(s string) string {
 	if r, ok := ParseGroupReply(s); ok {
 		return r.Text
 	}
+	if f, ok := parseGroupFile(s); ok {
+		return "📎 " + f.Name
+	}
+	if f, ok := parseGroupForward(s); ok {
+		return f.Text
+	}
 	return s
 }
 
@@ -691,4 +728,127 @@ func (c Chat) endedQuery() string {
 		return "&ended=1"
 	}
 	return ""
+}
+
+// The group message envelopes of cmd/apps/skychat/commands (group.go,
+// forward.go): a file reference, a forward and a delete tombstone, which
+// hides an earlier message by the same author.
+type groupFile struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Size int64  `json:"size"`
+}
+
+type groupForward struct {
+	From string `json:"from,omitempty"`
+	Text string `json:"text"`
+}
+
+type groupDelete struct {
+	ToTSNano int64 `json:"to_ts_nano"`
+}
+
+type groupEnvelope struct {
+	File    *groupFile    `json:"skychat_file,omitempty"`
+	Forward *groupForward `json:"skychat_forward,omitempty"`
+	Delete  *groupDelete  `json:"skychat_delete,omitempty"`
+}
+
+func parseGroupEnvelope(text, key string) (groupEnvelope, bool) {
+	t := strings.TrimSpace(text)
+	if t == "" || t[0] != '{' || !strings.Contains(t, key) {
+		return groupEnvelope{}, false
+	}
+	var env groupEnvelope
+	return env, json.Unmarshal([]byte(t), &env) == nil
+}
+
+func parseGroupFile(text string) (groupFile, bool) {
+	env, ok := parseGroupEnvelope(text, "skychat_file")
+	if !ok || env.File == nil || env.File.ID == "" {
+		return groupFile{}, false
+	}
+	return *env.File, true
+}
+
+func parseGroupForward(text string) (groupForward, bool) {
+	env, ok := parseGroupEnvelope(text, "skychat_forward")
+	if !ok || env.Forward == nil {
+		return groupForward{}, false
+	}
+	return *env.Forward, true
+}
+
+func parseGroupDelete(text string) (groupDelete, bool) {
+	env, ok := parseGroupEnvelope(text, "skychat_delete")
+	if !ok || env.Delete == nil || env.Delete.ToTSNano == 0 {
+		return groupDelete{}, false
+	}
+	return *env.Delete, true
+}
+
+func isGroupReply(s string) bool   { _, ok := ParseGroupReply(s); return ok }
+func isGroupFile(s string) bool    { _, ok := parseGroupFile(s); return ok }
+func isGroupForward(s string) bool { _, ok := parseGroupForward(s); return ok }
+
+// GroupDeleteBody is the tombstone that hides this visor's message tsNano
+// for everyone in the group.
+func GroupDeleteBody(tsNano int64) (string, error) {
+	b, err := json.Marshal(groupEnvelope{Delete: &groupDelete{ToTSNano: tsNano}})
+	return string(b), err
+}
+
+// ChatPrivacy is who may message this visor, skychat's /privacy.
+type ChatPrivacy struct {
+	Approval bool     `json:"approval"`
+	Blocked  []string `json:"blocked"`
+	Requests []string `json:"requests"`
+}
+
+// Requesting is whether pk's messages wait to be accepted or blocked.
+func (p *ChatPrivacy) Requesting(pk string) bool { return p != nil && slices.Contains(p.Requests, pk) }
+
+// BlockedKey is whether pk is blocked.
+func (p *ChatPrivacy) BlockedKey(pk string) bool { return p != nil && slices.Contains(p.Blocked, pk) }
+
+// ChatHit is one message skychat's /search found.
+type ChatHit struct {
+	Peer     string    `json:"peer,omitempty"`
+	GroupID  string    `json:"group_id,omitempty"`
+	From     string    `json:"from,omitempty"`
+	Outgoing bool      `json:"outgoing,omitempty"`
+	Text     string    `json:"text"`
+	TS       time.Time `json:"ts"`
+}
+
+// HitHref opens the conversation a hit belongs to.
+func (c Chat) HitHref(h ChatHit) string {
+	if h.GroupID != "" {
+		return c.url("?mode=groups&ended=1&group=" + h.GroupID)
+	}
+	return c.url("?mode=dm&peer=" + h.Peer)
+}
+
+// HitTitle names the conversation a hit belongs to.
+func (c Chat) HitTitle(h ChatHit) string {
+	if h.GroupID != "" {
+		for _, g := range c.Groups {
+			if g.ID == h.GroupID {
+				return g.Name
+			}
+		}
+		return h.GroupID
+	}
+	if n := c.NameOf(h.Peer); n != "" {
+		return n
+	}
+	return h.Peer
+}
+
+// b01Approval is the privacy action that flips approval.
+func b01Approval(on bool) string {
+	if on {
+		return "approval-off"
+	}
+	return "approval-on"
 }

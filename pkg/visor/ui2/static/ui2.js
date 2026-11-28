@@ -726,6 +726,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
 	function settle() {
 		if (!root()) return;
+		document.querySelectorAll('.tg-av img').forEach(function (i) { if (i.complete && !i.naturalWidth) i.remove(); });
 		fit();
 		place();
 		filter();
