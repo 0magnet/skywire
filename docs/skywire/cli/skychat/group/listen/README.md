@@ -6,6 +6,10 @@ Poll the visor's group inbox and print messages as they
 arrive. Mirrors `skywire cli skychat listen` for 1:1 chat but for
 group feeds. Ctrl+C exits.
 
+With the global --via it follows the remote visor's inbox through
+the visor RPC (GroupWait long-polls), since the gRPC stream only
+reaches the local visor.
+
 Auto-reconnects on visor restart: the underlying RPC connection
 dies when the visor halts (rebuild-restart loop). The poller
 catches "connection is shut down" / EOF / similar errors,

@@ -10,6 +10,9 @@ resends --since=<last seq> so no events are missed, and dedupes by id.
 Channels: dm | group | pair | system | all (default/all = dm+group+pair;
 "system" is opt-in). This replaces fragile log-file tailing.
 
+With --via, or a skychat without a port, events come through the visor
+RPC as /events?wait= batches.
+
 ## Usage
 
 ```

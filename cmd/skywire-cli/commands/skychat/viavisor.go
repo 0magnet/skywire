@@ -58,7 +58,11 @@ func (t *visorTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		return t.next.RoundTrip(r)
 	}
 	path := strings.TrimPrefix(r.URL.Path, "/")
-	if path == "sse" || path == "events" {
+	// /events?wait= answers one JSON batch, which the visor RPC can carry.
+	if path == "sse" || (path == "events" && r.URL.Query().Get("wait") == "") {
+		if clirpc.Via != "" || clirpc.VisorPK != "" {
+			return nil, errors.New("live streams cannot go through --via; `skywire cli skychat events --via` follows the same feed")
+		}
 		return nil, errors.New("this skychat has no port, and live streams need one: start it with --addr, or pass this command --addr")
 	}
 	var body []byte

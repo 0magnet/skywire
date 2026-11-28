@@ -816,6 +816,10 @@ var groupListenCmd = &cobra.Command{
 arrive. Mirrors ` + "`skywire cli skychat listen`" + ` for 1:1 chat but for
 group feeds. Ctrl+C exits.
 
+With the global --via it follows the remote visor's inbox through
+the visor RPC (GroupWait long-polls), since the gRPC stream only
+reaches the local visor.
+
 Auto-reconnects on visor restart: the underlying RPC connection
 dies when the visor halts (rebuild-restart loop). The poller
 catches "connection is shut down" / EOF / similar errors,
@@ -913,6 +917,13 @@ errors out):
 				out = escapeForOneLine(body)
 			}
 			cmdutil.Printf("[%s] [%s] %s: %s\n", ts.Format(time.RFC3339), groupID, senderPK, out)
+		}
+
+		// The gRPC stream only reaches the local visor, so --via follows the
+		// inbox with GroupWait over the visor RPC client instead.
+		if clirpc.Via != "" || clirpc.VisorPK != "" {
+			groupListenRPC(ctx, cmd, since, onMsg)
+			return
 		}
 
 		for {

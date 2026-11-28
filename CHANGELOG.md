@@ -8,6 +8,7 @@ updates may be generated with `scripts/changelog.sh <PR#lowest> <PR#highest>`
 
 ## Unreleased
 
+-   cli: `skychat group listen` and `skychat events` follow the remote visor under `--via` instead of silently using the local one  [#6362](https://github.com/skycoin/skywire/pull/6362)
 -   skychat, cli: `skywire cli skychat channel` serves skychat groups and DMs to Claude Code as a channel, with reply, history and groups tools, over the local visor or `--via`; skychat answers `/events?wait=` as one JSON batch for clients that reach it through the visor  [#6358](https://github.com/skycoin/skywire/pull/6358)
 -   visor, cli: add `--via hv://<pk>` to run any CLI command on a visor attached to the local hypervisor, over the hypervisor's own connection to it  [#6359](https://github.com/skycoin/skywire/pull/6359)
 -   skychat, cli: add `skywire cli skychat bridge telegram` to relay a skychat group to and from a Telegram chat

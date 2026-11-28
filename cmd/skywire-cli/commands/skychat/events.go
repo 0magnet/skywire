@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -60,7 +61,10 @@ var eventsCmd = &cobra.Command{
 Lossless resume: each event carries a monotonic seq; on reconnect the CLI
 resends --since=<last seq> so no events are missed, and dedupes by id.
 Channels: dm | group | pair | system | all (default/all = dm+group+pair;
-"system" is opt-in). This replaces fragile log-file tailing.`,
+"system" is opt-in). This replaces fragile log-file tailing.
+
+With --via, or a skychat without a port, events come through the visor
+RPC as /events?wait= batches.`,
 	DisableFlagsInUseLine: true,
 	Run: func(cmd *cobra.Command, _ []string) {
 		out := cmd.OutOrStdout()
@@ -76,8 +80,14 @@ Channels: dm | group | pair | system | all (default/all = dm+group+pair;
 		seen := newIDDedupe(20000)
 		delay := minReconnectDelay
 
+		// A skychat behind --via or without a port is reached through the
+		// visor RPC, which carries the batch form of /events, not the stream.
+		once := streamEventsOnce
+		if !chatTransport.useDirect() {
+			once = waitEventsOnce
+		}
 		for {
-			err := streamEventsOnce(ctx, out, jsonMode, eventsChannel, &lastSeq, seen)
+			err := once(ctx, out, jsonMode, eventsChannel, &lastSeq, seen)
 			if ctx.Err() != nil {
 				return
 			}
@@ -128,27 +138,74 @@ func streamEventsOnce(ctx context.Context, out io.Writer, jsonMode bool, channel
 		if !strings.HasPrefix(line, "data: ") {
 			continue // ": ping"/": connected" keepalives and blank lines
 		}
-		payload := strings.TrimPrefix(line, "data: ")
-		var ev cliChatEvent
-		if err := json.Unmarshal([]byte(payload), &ev); err != nil {
-			continue
-		}
-		if ev.Seq > *lastSeq {
-			*lastSeq = ev.Seq
-		}
-		if ev.ID != "" {
-			if seen.has(ev.ID) {
-				continue
-			}
-			seen.add(ev.ID)
-		}
-		if jsonMode {
-			fmt.Fprintln(out, payload) //nolint:errcheck // pass the NDJSON through verbatim
-			continue
-		}
-		fmt.Fprintln(out, formatEvent(ev)) //nolint:errcheck
+		emitEvent(out, jsonMode, []byte(strings.TrimPrefix(line, "data: ")), lastSeq, seen)
 	}
 	return sc.Err()
+}
+
+// eventsWaitTime is one /events?wait= long-poll. skychat caps it at 20 s.
+const eventsWaitTime = 20 * time.Second
+
+// waitEventsOnce asks /events?wait= for one batch after *lastSeq. Unlike the
+// stream it fits in one request, so it works through the visor RPC.
+func waitEventsOnce(ctx context.Context, out io.Writer, jsonMode bool, channel string, lastSeq *uint64, seen *idDedupe) error {
+	url := fmt.Sprintf("http://%s/events?since=%d&wait=%s", httpAddr, *lastSeq, eventsWaitTime)
+	if channel != "" {
+		url += "&channel=" + channel
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := chatClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("chat app /events: HTTP %s", resp.Status)
+	}
+	var batch struct {
+		Head   *uint64           `json:"head"`
+		Events []json.RawMessage `json:"events"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
+		return fmt.Errorf("chat app /events: %w", err)
+	}
+	if batch.Head == nil {
+		return errors.New("skychat on that visor has no /events wait mode, update it")
+	}
+	if *batch.Head < *lastSeq {
+		// skychat restarted and its seq began again; ids skip repeats.
+		*lastSeq = 0
+	}
+	for _, payload := range batch.Events {
+		emitEvent(out, jsonMode, payload, lastSeq, seen)
+	}
+	return nil
+}
+
+// emitEvent prints one event payload unless its id was already printed, and
+// advances *lastSeq.
+func emitEvent(out io.Writer, jsonMode bool, payload []byte, lastSeq *uint64, seen *idDedupe) {
+	var ev cliChatEvent
+	if err := json.Unmarshal(payload, &ev); err != nil {
+		return
+	}
+	if ev.Seq > *lastSeq {
+		*lastSeq = ev.Seq
+	}
+	if ev.ID != "" {
+		if seen.has(ev.ID) {
+			return
+		}
+		seen.add(ev.ID)
+	}
+	if jsonMode {
+		fmt.Fprintln(out, string(payload)) //nolint:errcheck // pass the NDJSON through verbatim
+		return
+	}
+	fmt.Fprintln(out, formatEvent(ev)) //nolint:errcheck
 }
 
 // formatEvent renders a human one-liner for non-JSON mode.
