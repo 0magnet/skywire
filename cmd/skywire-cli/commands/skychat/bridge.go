@@ -78,7 +78,10 @@ a root only EnvironmentFile.`,
 	Run: func(cmd *cobra.Command, _ []string) {
 		bridgeTelegramDefaults(cmd.Flags())
 		if bridgeTelegramSystemd {
-			cmdutil.Print(bridgeTelegramUnit())
+			unit := bridgeTelegramUnit()
+			internal.PrintOutput(cmd.Flags(), struct {
+				Unit string `json:"unit"`
+			}{unit}, unit)
 			return
 		}
 		if bridgeTelegramChat == 0 || bridgeTelegramGroup == "" {
