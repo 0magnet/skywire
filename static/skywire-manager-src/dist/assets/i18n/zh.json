@@ -2300,7 +2300,10 @@
       "read-only": "仅管理员可发言",
       "listed": "在目录中列出",
       "rotate": "新的群组密钥",
-      "rotate-confirm": "生成新的群组密钥？成员会自动获得。"
+      "rotate-confirm": "生成新的群组密钥？成员会自动获得。",
+      "pick-picture": "选择图片",
+      "picture-too-big": "即使降低质量，该图片也无法压缩到 32 KiB 以内。请换一张更简单的图片。",
+      "not-an-image": "该文件不是此浏览器可读取的图片。"
     },
     "errors": {
       "visor-unavailable": "节点不可用。",

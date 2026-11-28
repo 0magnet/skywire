@@ -625,6 +625,9 @@ func (hv *Hypervisor) ui2ChatMore(w http.ResponseWriter, r *http.Request, ctx *h
 		p, err := ctx.API.ProfileGet()
 		if err == nil {
 			args := visorapi.ProfileSetArgs{Name: strings.TrimSpace(r.FormValue("name")), Avatar: p.Avatar}
+			if a := r.FormValue("avatar"); a != "" {
+				args.Avatar = a
+			}
 			if r.FormValue("clear_avatar") != "" {
 				args.Avatar = ""
 			}
@@ -683,6 +686,16 @@ func (hv *Hypervisor) ui2ChatMore(w http.ResponseWriter, r *http.Request, ctx *h
 			_, err = ctx.API.GroupSetListed(group, on)
 		case "rotate":
 			_, err = ctx.API.GroupRotateKey(group)
+		case "avatar":
+			meta := visorapi.GroupSetMetaArgs{ID: group, SetAvatar: true, Avatar: r.FormValue("avatar")}
+			if r.FormValue("clear_avatar") == "" && meta.Avatar == "" {
+				err = errors.New(hv.ui2T(r, "ui2.chat.pick-picture"))
+				break
+			}
+			if r.FormValue("clear_avatar") != "" {
+				meta.Avatar = ""
+			}
+			_, err = ctx.API.GroupSetMeta(meta)
 		default:
 			err = errors.New("unknown action")
 		}

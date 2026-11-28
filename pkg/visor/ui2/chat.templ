@@ -643,7 +643,8 @@ templ ChatSettings(c Chat) {
 			if c.Profile != nil {
 				<form class="form" hx-post={ c.url("/profile") } hx-target="#chat-settings" hx-swap="outerHTML">
 					<input type="hidden" name="mode" value={ chatMode(c) }/>
-					<label>{ T(ctx, "ui2.chat.my-name") }<input name="name" value={ c.Profile.Name } maxlength="64"/></label>
+					@chatAvatarPick(c.PK, c.Profile.Name, c.Profile.Avatar)
+					<label>{ T(ctx, "ui2.chat.my-name") }<input name="name" value={ c.Profile.Name } maxlength="40"/></label>
 					<div class="bar">
 						<button class="btn sm primary" type="submit">{ T(ctx, "common.save") }</button>
 						if c.Profile.Avatar != "" {
@@ -680,6 +681,14 @@ templ chatRoomSettings(c Chat) {
 		<input name="name" required value={ c.Group.Name } aria-label={ T(ctx, "skychat.room-name") } maxlength="64"/>
 		<button class="btn sm" type="submit">{ T(ctx, "common.save") }</button>
 	</form>
+	<form class="tg-info-sec" hx-post={ c.url("/groups/settings") } hx-target="#chat-info" hx-swap="outerHTML">
+		<input type="hidden" name="group" value={ c.Group.ID }/>
+		<input type="hidden" name="action" value="avatar"/>
+		@chatAvatarPick(c.Group.ID, c.Group.Name, chatGroupAvatar(c))
+		if chatGroupAvatar(c) != "" {
+			<button class="btn sm" type="submit" name="clear_avatar" value="1">{ T(ctx, "ui2.chat.clear-avatar") }</button>
+		}
+	</form>
 	<div class="tg-info-sec">
 		<label class="tg-check">
 			<input type="checkbox" checked?={ c.Group.ReadOnly } hx-post={ c.url("/groups/settings") } hx-vals={ jsonVals(map[string]string{"group": c.Group.ID, "action": "readonly", "on": b01(!c.Group.ReadOnly)}) } hx-target="#chat-info" hx-swap="outerHTML"/>
@@ -703,4 +712,16 @@ templ chatSender(name, pk, hue string) {
 	} else {
 		<div class={ "tg-from", "mono", hue } title={ pk } data-label-for={ pk }>{ chatShortKey(pk) }</div>
 	}
+}
+
+// chatAvatarPick picks a picture: the page scales and crops it to a square of
+// at most 256 pixels and 32 KiB, as the profile and room pictures must be
+// (pkg/skychat/profile), puts it in the avatar field and sends the form.
+templ chatAvatarPick(id, name, img string) {
+	<label class="tg-pick" title={ T(ctx, "ui2.chat.pick-picture") }>
+		@chatAvatar(id, name, img, "lg")
+		<span class="mi tg-pick-icon">photo_camera</span>
+		<input type="file" accept="image/*" data-avatar-pick data-too-big={ T(ctx, "ui2.chat.picture-too-big") } data-not-image={ T(ctx, "ui2.chat.not-an-image") } aria-label={ T(ctx, "ui2.chat.pick-picture") }/>
+		<input type="hidden" name="avatar" value=""/>
+	</label>
 }

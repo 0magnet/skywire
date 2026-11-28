@@ -1000,3 +1000,44 @@ document.addEventListener('DOMContentLoaded', function () {
 	document.addEventListener('htmx:afterSettle', mark);
 	document.addEventListener('DOMContentLoaded', mark);
 })();
+
+// A picked picture is cropped to the middle square, scaled to at most 256
+// pixels and saved as JPEG at the best quality that fits 32 KiB, the limits
+// of pkg/skychat/profile, then its form is sent.
+(function () {
+	'use strict';
+	var dim = 256, maxBytes = 32 * 1024;
+	function fail(input, key) {
+		var t = document.getElementById('toast');
+		if (t) { t.textContent = input.getAttribute(key) || ''; t.className = 'show err'; }
+		input.value = '';
+	}
+	document.addEventListener('change', function (e) {
+		var input = e.target;
+		if (!input.matches || !input.matches('[data-avatar-pick]') || !input.files || !input.files[0]) return;
+		var file = input.files[0];
+		if (!/^image\//.test(file.type)) { fail(input, 'data-not-image'); return; }
+		var url = URL.createObjectURL(file), img = new Image();
+		img.onerror = function () { URL.revokeObjectURL(url); fail(input, 'data-not-image'); };
+		img.onload = function () {
+			URL.revokeObjectURL(url);
+			var side = Math.min(img.naturalWidth, img.naturalHeight), out = Math.min(dim, side);
+			var c = document.createElement('canvas');
+			c.width = c.height = out;
+			c.getContext('2d').drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, out, out);
+			var data = '';
+			for (var q = 0.92; q >= 0.3; q -= 0.08) {
+				data = c.toDataURL('image/jpeg', q);
+				if ((data.length - data.indexOf(',') - 1) * 3 / 4 <= maxBytes) break;
+				data = '';
+			}
+			if (!data) { fail(input, 'data-too-big'); return; }
+			var label = input.closest('.tg-pick'), hidden = label.querySelector('input[name="avatar"]');
+			hidden.value = data;
+			var av = label.querySelector('.tg-av'), pic = av.querySelector('img') || av.appendChild(document.createElement('img'));
+			pic.src = data;
+			if (input.form) input.form.requestSubmit();
+		};
+		img.src = url;
+	});
+})();
